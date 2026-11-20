@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+.env
+.env.local
+*.log
+
+# local archives
+clawgate.zip
+clawgate.tar.gz
+gateway.log

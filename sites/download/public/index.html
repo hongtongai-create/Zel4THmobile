@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>clawgate — ดาวน์โหลด</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0c11;
+        --panel: #11141c;
+        --line: #232936;
+        --text: #e6eaf2;
+        --muted: #8b94a7;
+        --accent: #6ee7b7;
+        --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: env(safe-area-inset-top, 0) 20px env(safe-area-inset-bottom, 0);
+        background: radial-gradient(900px 500px at 20% -10%, #13221f 0%, var(--bg) 60%), var(--bg);
+        color: var(--text);
+        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      main {
+        width: min(520px, 100%);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 4px;
+      }
+      .mark {
+        color: var(--accent);
+        font-size: 20px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: 0.01em;
+      }
+      .sub {
+        margin: 0 0 22px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+      a.card {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px 18px;
+        margin-bottom: 10px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--panel);
+        color: var(--text);
+        text-decoration: none;
+        transition: border-color 0.15s;
+      }
+      a.card:active,
+      a.card:hover {
+        border-color: var(--accent);
+      }
+      a.card.primary {
+        border-color: #2f4a42;
+        background: #12211d;
+      }
+      .ext {
+        flex: 0 0 auto;
+        width: 44px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: #0b1418;
+        border: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--accent);
+      }
+      .label {
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        font-family: var(--mono);
+      }
+      .meta {
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+        color: #5c6577;
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.9;
+      }
+      ol {
+        margin: 8px 0 0;
+        padding-left: 20px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      code {
+        font-family: var(--mono);
+        color: var(--accent);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand"><span class="mark">◆</span><h1>clawgate</h1></div>
+      <p class="sub">agent harness · download</p>
+
+      <a class="card primary" href="/clawgate.zip" download="clawgate.zip">
+        <span class="ext">ZIP</span>
+        <span>
+          <span class="label">clawgate.zip</span>
+          <span class="hint" style="display: block">แนะนำ · Windows / Mac / แท็บเล็ต</span>
+        </span>
+      </a>
+
+      <a class="card" href="/clawgate.tar.gz" download="clawgate.tar.gz">
+        <span class="ext">TGZ</span>
+        <span>
+          <span class="label">clawgate.tar.gz</span>
+          <span class="hint" style="display: block">Termux / Linux · <code>tar -xzf</code></span>
+        </span>
+      </a>
+
+      <ol>
+        <li>แตกไฟล์ แล้วเข้าโฟลเดอร์ <code>clawgate</code></li>
+        <li><code>npm install</code></li>
+        <li><code>cp .env.example .env</code> แล้วใส่ GATEWAY_TOKEN + key ของ model</li>
+        <li><code>npm run dev</code> → เปิด board ที่พอร์ต 8787</li>
+      </ol>
+
+      <p class="meta">
+        build: commit 66811f5 · 2026-11-15 09:17 UTC<br />
+        ไม่มี .env / data/ / node_modules ในไฟล์ · ต้อง npm install เอง
+      </p>
+    </main>
+  </body>
+</html>

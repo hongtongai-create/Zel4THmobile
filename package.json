@@ -1,0 +1,30 @@
+{
+  "name": "clawgate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Openclaw-style agent harness: model selection, Telegram channel, Facebook posting, token-authenticated WebSocket gateway + board.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts gateway",
+    "start": "node dist/cli.js gateway",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "chat": "tsx src/cli.ts chat",
+    "models": "tsx src/cli.ts models",
+    "usage": "tsx src/cli.ts usage",
+    "icons": "node scripts/make-icons.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

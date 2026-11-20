@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <title>clawgate</title>
+    <meta name="theme-color" content="#0a0c11" />
+    <meta name="description" content="Mobile control board for the clawgate agent harness." />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="clawgate" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <div class="scrim" id="scrim"></div>
+
+      <aside class="drawer" id="drawer" aria-label="Sessions and settings">
+        <div class="drawer-head">
+          <div class="brand">
+            <span class="mark">◆</span>
+            <div>
+              <strong>clawgate</strong>
+              <small>agent harness</small>
+            </div>
+          </div>
+          <button class="icon-btn" id="drawer-close" type="button" aria-label="Close menu">✕</button>
+        </div>
+
+        <div class="status">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text">connecting…</span>
+        </div>
+
+        <button class="primary wide" id="new-chat" type="button">New chat</button>
+
+        <div class="section-title">Sessions</div>
+        <ul class="sessions" id="session-list"></ul>
+
+        <button class="ghost wide" id="install" type="button" hidden>Install as app</button>
+
+        <div class="foot">
+          ws + gateway token<br />
+          <span id="tool-list">tools: —</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="appbar">
+          <button class="icon-btn" id="menu" type="button" aria-label="Open menu">☰</button>
+          <div class="title">
+            <h1 id="session-title">New conversation</h1>
+            <p id="session-meta">no messages yet</p>
+          </div>
+          <button class="model-chip" id="model-btn" type="button" aria-label="Change model">
+            <span id="model-chip-text">model</span>
+          </button>
+        </header>
+
+        <div class="messages" id="messages">
+          <div class="empty" id="empty">
+            <p class="empty-title">Connected to the gateway</p>
+            <p class="muted">
+              Ask the agent to do something and tool calls appear here live.
+            </p>
+          </div>
+        </div>
+
+        <form class="composer" id="composer">
+          <textarea
+            id="input"
+            rows="1"
+            enterkeyhint="send"
+            placeholder="Message the agent…"
+            aria-label="Message"
+          ></textarea>
+          <button class="send" type="submit" id="send" aria-label="Send">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path
+                d="M4 12l16-8-6 8 6 8-16-8z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </form>
+      </main>
+    </div>
+
+    <div class="sheet" id="model-sheet" aria-label="Model picker" aria-hidden="true">
+      <div class="sheet-head">
+        <span>Model</span>
+        <button class="icon-btn" id="sheet-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body" id="model-options"></div>
+    </div>
+
+    <div class="overlay" id="login">
+      <form class="card" id="login-form">
+        <h2>Connect to gateway</h2>
+        <p class="muted">Paste the <code>GATEWAY_TOKEN</code> from your <code>.env</code>.</p>
+        <input
+          id="token-input"
+          type="password"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="gateway token"
+        />
+        <button class="primary wide" type="submit">Connect</button>
+        <p class="error" id="login-error"></p>
+      </form>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
