@@ -18,7 +18,7 @@
       "description": "Adds a current_time tool (no dependencies)",
       "files": {
         "plugin.json": "{\n  \"name\": \"clock\",\n  \"description\": \"Current time and date in any IANA time zone\",\n  \"entry\": \"index.mjs\"\n}\n",
-        "index.mjs": "export const tools = [\n  {\n    name: 'current_time',\n    description: 'Return the current date and time for an IANA time zone (default UTC).',\n    parameters: {\n      type: 'object',\n      properties: { timeZone: { type: 'string', description: \"e.g. Asia/Bangkok\" } },\n      required: [],\n    },\n    async handler(args) {\n      const zone = typeof args.timeZone === 'string' && args.timeZone ? args.timeZone : 'UTC';\n      const now = new Date();\n      const formatted = new Intl.DateTimeFormat('en-CA', {\n        timeZone: zone,\n        dateStyle: 'full',\n        timeStyle: 'long',\n      }).format(now);\n      return formatted + ' (' + zone + ')' ;\n    },\n  },\n];\n"
+        "index.mjs": "export const tools = [\n  {\n    name: 'current_time',\n    description: 'Return the current date and time for an IANA time zone (default UTC).',\n    parameters: {\n      type: 'object',\n      properties: { timeZone: { type: 'string', description: \"e.g. Asia/Bangkok\" } },\n      required: [],\n    },\n    async handler(args) {\n      const zone = typeof args.timeZone === 'string' && args.timeZone ? args.timeZone : 'UTC';\n      const now = new Date();\n      const formatted = new Intl.DateTimeFormat('en-CA', {\n        timeZone: zone,\n        dateStyle: 'full',\n        timeStyle: 'long',\n      }).format(now);\n      return formatted + ' (' + zone + ')';\n    },\n  },\n];\n"
       }
     },
     {
