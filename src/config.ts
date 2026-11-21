@@ -35,6 +35,10 @@ export type Config = {
   telegram: TelegramConfig | null;
   dataDir: string;
   boardDir: string;
+  /** Where skills, plugins and mcp.json live (`EXTENSIONS_DIR`). */
+  extensionsDir: string;
+  /** clawhub registry index: an https URL, file: URL or local path. Null disables installing. */
+  clawhubUrl: string | null;
   maxIterations: number;
   historyLimit: number;
   /** USD per 1M tokens, from `MODEL_PRICES`. Empty when no prices are set. */
@@ -63,6 +67,9 @@ export function loadDotEnv(file = ".env"): void {
   }
 }
 
+const DEFAULT_CLAWHUB_URL =
+  "https://raw.githubusercontent.com/hongtongai-create/Zel4THmobile/main/clawhub/index.json";
+
 const DEFAULT_MODELS: Record<string, string[]> = {
   openai: ["gpt-4.1-mini", "gpt-4o-mini", "gpt-4o"],
   openrouter: ["openai/gpt-4.1-mini", "anthropic/claude-sonnet-4", "google/gemini-2.5-flash"],
@@ -90,6 +97,13 @@ function int(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** `CLAWHUB_URL=off` disables the registry; anything else is used as the index location. */
+function clawhubUrl(value: string | null): string | null {
+  if (!value) return DEFAULT_CLAWHUB_URL;
+  if (["off", "none", "disabled", "-"].includes(value.toLowerCase())) return null;
+  return value;
 }
 
 function buildProviders(env: NodeJS.ProcessEnv): ProviderConfig[] {
@@ -185,6 +199,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     telegram: buildTelegram(env),
     dataDir: path.resolve(str(env, "DATA_DIR") ?? "data"),
     boardDir: path.resolve(str(env, "BOARD_DIR") ?? "board"),
+    extensionsDir: path.resolve(str(env, "EXTENSIONS_DIR") ?? "extensions"),
+    clawhubUrl: clawhubUrl(str(env, "CLAWHUB_URL")),
     maxIterations: Math.max(1, int(env, "MAX_ITERATIONS", 8)),
     historyLimit: Math.max(6, int(env, "HISTORY_LIMIT", 60)),
     prices: parsePrices(str(env, "MODEL_PRICES")),

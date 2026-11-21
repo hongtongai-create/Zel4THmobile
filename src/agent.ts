@@ -1,4 +1,5 @@
 import type { Config } from "./config.js";
+import type { ExtensionManager } from "./extensions/index.js";
 import type { Logger } from "./log.js";
 import type { ModelCatalog, ResolvedModel } from "./models.js";
 import { chatCompletion } from "./models.js";
@@ -32,6 +33,7 @@ export type AgentDeps = {
   tools: ToolRegistry;
   log: Logger;
   ledger?: UsageLedger;
+  extensions?: ExtensionManager;
 };
 
 export type RunResult = {
@@ -61,6 +63,10 @@ export class AgentHarness {
     return this.deps.store;
   }
 
+  get extensions(): ExtensionManager | null {
+    return this.deps.extensions ?? null;
+  }
+
   private systemPrompt(model: string): string {
     const { config, tools } = this.deps;
     const lines = [SYSTEM_RULES, "", `Current model: ${model}`];
@@ -75,6 +81,20 @@ export class AgentHarness {
 
     const toolList = tools.describe();
     if (toolList) lines.push("", "Available tools:", toolList);
+
+    const extensions = this.deps.extensions;
+    if (extensions) {
+      if (extensions.skillList.length > 0 || extensions.pluginList.length > 0) {
+        capabilities.push(
+          "Use your installed skills and plugins (listed below) when a request matches them.",
+        );
+      }
+      capabilities.push(
+        "Grow your own capabilities: the extensions tool can search a clawhub registry and install skills, plugins or MCP servers.",
+      );
+      const sections = extensions.promptSections();
+      if (sections.length > 0) lines.push("", ...sections);
+    }
 
     return lines.join("\n");
   }
@@ -110,9 +130,13 @@ export class AgentHarness {
     const modelRef = session.model || defaultModel;
     const model = catalog.resolve(modelRef);
 
+    const prompt = this.systemPrompt(modelRef);
     if (session.messages.length === 0) {
-      session.messages.push({ role: "system", content: this.systemPrompt(modelRef) });
+      session.messages.push({ role: "system", content: prompt });
       session.title = text.slice(0, 60).replace(/\s+/g, " ").trim() || null;
+    } else if (session.messages[0]?.role === "system" && session.messages[0].content !== prompt) {
+      // Skills, plugins and MCP tools can change mid-session; keep the prompt current.
+      session.messages[0] = { role: "system", content: prompt };
     }
     session.messages.push({ role: "user", content: text });
     session.updatedAt = new Date().toISOString();

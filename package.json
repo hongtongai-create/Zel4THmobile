@@ -15,8 +15,10 @@
     "chat": "tsx src/cli.ts chat",
     "models": "tsx src/cli.ts models",
     "usage": "tsx src/cli.ts usage",
+    "extensions": "tsx src/cli.ts extensions",
     "icons": "node scripts/make-icons.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:ext": "node scripts/smoke-extensions.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

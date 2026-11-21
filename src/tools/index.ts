@@ -27,6 +27,11 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  /** Used when extensions reload: their old tools must leave the registry first. */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   get size(): number {
     return this.tools.size;
   }

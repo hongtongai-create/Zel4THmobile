@@ -196,6 +196,7 @@ export function createGateway(options: GatewayOptions) {
       tools: harness.tools.names(),
       defaultModel: harness.catalog.defaultRef(),
       models: harness.catalog.list(),
+      extensions: harness.extensions?.summary() ?? null,
     });
 
     socket.on("message", (data) => {
