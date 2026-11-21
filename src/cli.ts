@@ -5,11 +5,14 @@ import { createInterface } from "node:readline/promises";
 import { AgentHarness } from "./agent.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { loadConfig, loadDotEnv } from "./config.js";
+import { ExtensionManager } from "./extensions/index.js";
+import { HubClient, describeEntry } from "./extensions/hub.js";
 import { createGateway } from "./gateway/server.js";
 import { createLogger } from "./log.js";
 import { ModelCatalog } from "./models.js";
 import { SessionStore } from "./store.js";
 import { createToolRegistry } from "./tools/index.js";
+import { createExtensionsTool } from "./tools/extensions.js";
 import type { AgentEvent } from "./types.js";
 import type { UsageSummary } from "./usage.js";
 import { UsageLedger, describeCost, formatMoney, formatTokens, tokenCounts } from "./usage.js";
@@ -18,7 +21,7 @@ const log = createLogger("cli");
 
 loadDotEnv();
 
-async function bootstrap() {
+async function bootstrap(options: { extensions?: boolean } = {}) {
   const config = loadConfig();
   const catalog = new ModelCatalog(config.providers, config.defaultModel);
   const store = new SessionStore(config.dataDir);
@@ -26,8 +29,25 @@ async function bootstrap() {
   const tools = createToolRegistry(config);
   const ledger = new UsageLedger(config.dataDir, config.prices);
   await ledger.init();
-  const harness = new AgentHarness({ config, store, catalog, tools, ledger, log: createLogger("agent") });
-  return { config, catalog, store, tools, ledger, harness };
+
+  let extensions: ExtensionManager | null = null;
+  if (options.extensions) {
+    extensions = new ExtensionManager(config, createLogger("extensions"));
+    await extensions.init();
+    extensions.register(tools);
+    tools.register(createExtensionsTool(extensions));
+  }
+
+  const harness = new AgentHarness({
+    config,
+    store,
+    catalog,
+    tools,
+    ledger,
+    log: createLogger("agent"),
+    extensions: extensions ?? undefined,
+  });
+  return { config, catalog, store, tools, ledger, extensions, harness };
 }
 
 function printModels(catalog: ModelCatalog): void {
@@ -104,7 +124,7 @@ async function runUsage(): Promise<void> {
 }
 
 async function runGateway(): Promise<void> {
-  const { config, catalog, tools, harness } = await bootstrap();
+  const { config, catalog, tools, harness, extensions } = await bootstrap({ extensions: true });
 
   if (catalog.isEmpty) {
     log.warn("no model providers configured - set OPENAI_API_KEY, OPENROUTER_API_KEY, OLLAMA_ENABLED=1 or LLM_BASE_URL");
@@ -134,6 +154,7 @@ async function runGateway(): Promise<void> {
     log.info(`${signal} received, shutting down`);
     await telegram?.stop();
     await gateway.stop();
+    await extensions?.close();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
@@ -141,7 +162,7 @@ async function runGateway(): Promise<void> {
 }
 
 async function runChat(): Promise<void> {
-  const { catalog, harness } = await bootstrap();
+  const { catalog, harness, extensions } = await bootstrap({ extensions: true });
   if (catalog.isEmpty) {
     console.error("No model providers configured. Add one to .env first.");
     process.exit(1);
@@ -209,6 +230,71 @@ async function runChat(): Promise<void> {
   }
 
   rl.close();
+  await extensions?.close();
+}
+
+async function runExtensions(args: string[]): Promise<void> {
+  const config = loadConfig();
+  const hub = new HubClient(config.clawhubUrl, config.extensionsDir, createLogger("extensions"));
+  const [action = "list"] = args;
+
+  switch (action) {
+    case "list": {
+      const installed = await hub.installed();
+      console.log(`extensions dir: ${config.extensionsDir}`);
+      console.log(`registry: ${hub.registryUrl ?? "not configured (set CLAWHUB_URL)"}`);
+      if (installed.length === 0) {
+        console.log("nothing installed");
+        return;
+      }
+      for (const entry of installed) {
+        const version = entry.version ? ` v${entry.version}` : "";
+        const description = entry.description ? ` - ${entry.description}` : "";
+        console.log(`${entry.kind.padEnd(6)} ${entry.name}${version}${description}`);
+      }
+      return;
+    }
+    case "search": {
+      const query = args.slice(1).join(" ");
+      const entries = await hub.search(query);
+      if (entries.length === 0) {
+        console.log(`no registry entries matched "${query}"`);
+        return;
+      }
+      for (const entry of entries) console.log(describeEntry(entry));
+      return;
+    }
+    case "install": {
+      const name = args[1]?.trim();
+      if (!name) {
+        console.error("usage: clawgate extensions install <name>");
+        process.exit(1);
+      }
+      const installed = await hub.installByName(name);
+      console.log(`installed ${installed.kind} "${installed.name}" into ${config.extensionsDir}`);
+      console.log("restart the gateway, or ask the agent to run extensions action=reload");
+      return;
+    }
+    case "remove": {
+      const name = args[1]?.trim();
+      if (!name) {
+        console.error("usage: clawgate extensions remove <name>");
+        process.exit(1);
+      }
+      const kind = await hub.remove(name);
+      console.log(`removed ${kind} "${name}"`);
+      return;
+    }
+    default:
+      console.log(`unknown extensions action "${action}"
+
+usage:
+  clawgate extensions            list installed skills, plugins and MCP servers
+  clawgate extensions search Q   search the clawhub registry
+  clawgate extensions install N  install one (skill, plugin or mcp)
+  clawgate extensions remove N   remove one`);
+      process.exit(1);
+  }
 }
 
 function printHelp(): void {
@@ -219,6 +305,7 @@ usage:
   clawgate chat        terminal chat with the agent
   clawgate models      list configured models
   clawgate usage       token usage and estimated cost per model and per provider
+  clawgate extensions  list/search/install/remove skills, plugins and MCP servers
 
 environment: see .env.example (GATEWAY_TOKEN is required)`);
 }
@@ -238,6 +325,10 @@ async function main(): Promise<void> {
       return;
     case "usage":
       await runUsage();
+      return;
+    case "extensions":
+    case "ext":
+      await runExtensions(process.argv.slice(3));
       return;
     case "help":
     case "--help":
