@@ -16,7 +16,8 @@ Board(WS)─┘        │
 | --- | --- |
 | `src/agent.ts` | agent loop: ประกอบ prompt → เรียก model → เรียก tool → วนจนได้คำตอบ, เก็บประวัติ |
 | `src/models.ts` | model catalog (`provider:model`) + client ที่รองรับ OpenAI-compatible API |
-| `src/tools/` | tool registry และ tool `facebook_post` (Graph API) |
+| `src/tools/` | tool registry, tool `facebook_post` (Graph API) และ tool `extensions` (ติดตั้ง/ถอน/ค้นหา extension) |
+| `src/extensions/` | ระบบส่วนขยาย: skills (markdown), plugins (JS), MCP servers (stdio) และ clawhub client |
 | `src/channels/telegram.ts` | long-polling Telegram พร้อมคำสั่ง `/model`, `/models`, `/reset`, `/status` |
 | `src/gateway/server.ts` | HTTP + WebSocket gateway (ตรวจ token ก่อน upgrade) และเสิร์ฟ board |
 | `src/store.ts` | เก็บ session เป็นไฟล์ JSON ใน `data/sessions/` |
@@ -24,7 +25,7 @@ Board(WS)─┘        │
 | `board/` | board UI แบบ mobile-first (vanilla JS) ต่อ WebSocket, เลือก model, ดู tool call แบบสด |
 | `board/manifest.webmanifest`, `board/sw.js`, `board/icons/` | ทำให้ board ติดตั้งเป็นแอพได้ (PWA) |
 | `scripts/make-icons.mjs` | สร้างไอคอน PNG ทั้งชุดโดยไม่ต้องพึ่ง library ภายนอก (`npm run icons`) |
-| `src/cli.ts` | คำสั่ง `gateway`, `chat`, `models` |
+| `src/cli.ts` | คำสั่ง `gateway`, `chat`, `models`, `usage`, `extensions` |
 
 ## เริ่มใช้งาน
 
@@ -160,6 +161,105 @@ board ถูกออกแบบมาให้ใช้บนมือถื�
 > Service worker และการติดตั้งเป็นแอพต้องมาจาก **HTTPS** (หรือ `localhost`)
 > ถ้าเปิดผ่าน IP ในวง LAN ด้วย http:// จะยังใช้ได้แต่ติดตั้งเป็นแอพไม่ได้ — วางหลัง reverse proxy ที่มี TLS
 
+## Extensions: skills / plugins / MCP / clawhub
+
+เพิ่มความสามารถให้ agent ได้โดยไม่ต้องแก้โค้ด ทุกอย่างอยู่ใน `EXTENSIONS_DIR` (ค่าเริ่มต้น `extensions/`)
+และโหลดใหม่ได้ทันทีโดยไม่ต้องรีสตาร์ท gateway
+
+### 1. Skills — คำแนะนำแบบ markdown เข้าไปใน system prompt
+
+```
+extensions/skills/<ชื่อ>/SKILL.md
+```
+
+```markdown
+---
+name: web-research
+description: วิธีค้นข้อมูลบนเว็บแล้วสรุป
+---
+
+เมื่อต้องค้นข้อมูล: 1) ... 2) ...
+```
+
+### 2. Plugins — JS module ที่เพิ่ม tool เอง
+
+```
+extensions/plugins/<ชื่อ>/plugin.json   # { "name", "description", "entry": "index.mjs" }
+extensions/plugins/<ชื่อ>/index.mjs
+```
+
+```js
+export const prompt = "ทางเลือก: ข้อความที่จะถูกเพิ่มเข้า system prompt";
+export const tools = [
+  {
+    name: "current_time",
+    description: "คืนเวลาปัจจุบันตาม time zone",
+    parameters: { type: "object", properties: { timeZone: { type: "string" } } },
+    async handler(args) {
+      return new Date().toISOString();
+    },
+  },
+];
+```
+
+plugin รันในโปรเซสเดียวกับ agent จึงมีสิทธิ์เท่ากับ gateway — ติดตั้งเฉพาะจากแหล่งที่ไว้ใจ
+
+### 3. MCP servers — ต่อ tool จาก ecosystem ของ MCP
+
+gateway จะ spawn server แบบ stdio แล้วคุย JSON-RPC (`initialize` → `tools/list` → `tools/call`)
+ทุก tool จะโผล่เป็น `<server>__<tool>`
+
+```json
+// extensions/mcp.json
+{
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] }
+  }
+}
+```
+
+server ที่สตาร์ทไม่ขึ้นจะถูกข้ามพร้อม log warning โดยไม่ทำให้ gateway ล่ม
+
+### 4. clawhub — registry ให้ agent ติดตั้งเอง
+
+`CLAWHUB_URL` ชี้ไปที่ index JSON (https, `file:` หรือ path ในเครื่อง) โครงสร้าง:
+
+```json
+{
+  "version": 1,
+  "entries": [
+    { "name": "clock", "kind": "plugin", "version": "1.0.0", "description": "...",
+      "files": { "plugin.json": "{...}", "index.mjs": "export const tools = [...]" } },
+    { "name": "web-research", "kind": "skill", "files": { "SKILL.md": "..." } },
+    { "name": "filesystem", "kind": "mcp", "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] }
+  ]
+}
+```
+
+คำสั่ง:
+
+```bash
+node dist/cli.js extensions                    # list ที่ติดตั้งแล้ว
+node dist/cli.js extensions search research    # ค้น registry
+node dist/cli.js extensions install clock      # ติดตั้ง (skill / plugin / mcp)
+node dist/cli.js extensions remove clock       # ถอนออก
+```
+
+หรือให้ agent ทำเองผ่าน tool `extensions`:
+
+```json
+{"action":"search","query":"time"}
+{"action":"install","name":"clock"}
+{"action":"list"}
+{"action":"remove","name":"clock"}
+{"action":"reload"}
+```
+
+การติดตั้งตรวจชื่อ (`[a-z0-9._-]`), ปฏิเสธ path ที่มี `..` หรือ absolute, จำกัดขนาดไฟล์ 512 KB
+และ 40 ไฟล์ต่อ entry — registry ยังเป็นโค้ดที่รันได้ (plugin) จึงควรใช้ registry ที่คุณควบคุมเอง
+repo นี้มี index ตัวอย่างที่ `clawhub/index.json`
+
 ## Board + gateway protocol
 
 board เปิด WebSocket ไปที่ `ws://<host>/ws?token=<GATEWAY_TOKEN>` (หรือ header
@@ -182,7 +282,7 @@ board เปิด WebSocket ไปที่ `ws://<host>/ws?token=<GATEWAY_TOKE
 
 | frame | ความหมาย |
 | --- | --- |
-| `{type:"ready", tools, models, defaultModel}` | handshake สำเร็จ |
+| `{type:"ready", tools, models, defaultModel, extensions}` | handshake สำเร็จ (มีรายชื่อ skill/plugin/mcp ที่โหลดอยู่) |
 | `{type:"event", event:{type:"turn.start"}}` | เริ่ม turn |
 | `{type:"event", event:{type:"tool.start", name, args}}` | กำลังเรียก tool |
 | `{type:"event", event:{type:"tool.result", ok, preview}}` | ผล tool |
