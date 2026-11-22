@@ -11,7 +11,9 @@ data/
 
 *.log
 
-# local archives
+# local archives (built for the download page, uploaded but not committed)
 clawgate.zip
 clawgate.tar.gz
+sites/download/public/*.zip
+sites/download/public/*.tar.gz
 gateway.log
