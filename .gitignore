@@ -1,8 +1,14 @@
 node_modules/
 dist/
 data/
+
+# local config and secrets — never commit these
 .env
-.env.local
+.env.*
+!.env.example
+*.env
+*.env.save
+
 *.log
 
 # local archives
