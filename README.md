@@ -32,7 +32,7 @@ Board(WS)─┘        │
 ```bash
 npm install
 cp .env.example .env
-# แก้ GATEWAY_TOKEN และใส่ key ของ model อย่างน้อยหนึ่งตัว
+# แก้ GATEWAY_TOKEN และใส่ key ของ model อย่างน้อยหนึ่งตัว # openssl rand -hex 32
 npm run dev           # = tsx src/cli.ts gateway
 ```
 
