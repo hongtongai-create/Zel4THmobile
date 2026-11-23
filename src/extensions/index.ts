@@ -1,12 +1,13 @@
 import path from "node:path";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
-import type { ToolRegistry } from "../tools/index.js";
+import type { Tool, ToolRegistry } from "../tools/index.js";
+import type { ApprovalAction } from "./approvals.js";
 import { HubClient, describeEntry } from "./hub.js";
 import { loadMcpConfig, startMcpServers, type McpRuntime } from "./mcp.js";
 import { loadPlugins } from "./plugins.js";
 import { loadSkills } from "./skills.js";
-import type { InstalledEntry, LoadedPlugin, Skill } from "./types.js";
+import type { ExtensionDiagnostic, InstalledEntry, LoadedPlugin, Skill } from "./types.js";
 
 export type ExtensionSummary = {
   skills: string[];
@@ -25,7 +26,12 @@ export class ExtensionManager {
   private plugins: LoadedPlugin[] = [];
   private mcp: McpRuntime[] = [];
   private owned = new Set<string>();
+  /** Tool instances we registered, so we never unregister someone else's tool. */
+  private registered = new Map<string, Tool>();
   private registry: ToolRegistry | null = null;
+  private pluginDiagnostics: ExtensionDiagnostic[] = [];
+  private toolDiagnostics: ExtensionDiagnostic[] = [];
+  private readonly allowOverride: boolean;
 
   readonly hub: HubClient;
   readonly dir: string;
@@ -36,6 +42,7 @@ export class ExtensionManager {
   ) {
     this.dir = config.extensionsDir;
     this.hub = new HubClient(config.clawhubUrl, config.extensionsDir, log);
+    this.allowOverride = config.allowToolOverride;
   }
 
   get skillList(): Skill[] {
@@ -48,7 +55,10 @@ export class ExtensionManager {
 
   async init(): Promise<void> {
     this.skills = await loadSkills(path.join(this.dir, "skills"));
-    this.plugins = await loadPlugins(path.join(this.dir, "plugins"), this.log);
+    const loaded = await loadPlugins(path.join(this.dir, "plugins"), this.log);
+    this.plugins = loaded.plugins;
+    this.pluginDiagnostics = loaded.diagnostics;
+    this.toolDiagnostics = [];
 
     const servers = await loadMcpConfig(path.join(this.dir, "mcp.json"));
     this.mcp = await startMcpServers(servers, this.log);
@@ -121,17 +131,72 @@ export class ExtensionManager {
     return [...this.plugins.flatMap((plugin) => plugin.tools), ...this.mcp.flatMap((runtime) => runtime.tools)];
   }
 
+  /**
+   * Read-only report of every extension directory plus any tool that was
+   * refused because its name collides with an existing tool.
+   */
+  diagnostics(): ExtensionDiagnostic[] {
+    return [...this.pluginDiagnostics, ...this.toolDiagnostics];
+  }
+
+  formatDiagnostics(): string {
+    const lines = this.diagnostics().map((entry) => {
+      const tools = entry.tools.length > 0 ? ` [${entry.tools.join(", ")}]` : "";
+      return `${entry.status.padEnd(7)} ${entry.kind}:${entry.name}${tools} - ${entry.reason}`;
+    });
+    return lines.length > 0 ? lines.join("\n") : "no extension directories found";
+  }
+
   register(registry: ToolRegistry): void {
     this.registry = registry;
-    for (const name of this.owned) registry.unregister(name);
+    // Only remove what we put there: a built-in tool may share the name.
+    for (const [name, tool] of this.registered) {
+      if (registry.get(name) === tool) registry.unregister(name);
+    }
+    this.registered.clear();
     this.owned.clear();
+    this.toolDiagnostics = [];
 
     for (const tool of this.extensionTools()) {
-      const existing = registry.names().includes(tool.name);
-      if (existing) this.log.warn(`extension tool "${tool.name}" overrides an existing tool`);
-      registry.register(tool);
+      const taken = registry.names().includes(tool.name) && !this.owned.has(tool.name);
+      if (taken && !this.allowOverride) {
+        const kind = this.plugins.some((plugin) => plugin.tools.includes(tool)) ? "plugin" : "mcp";
+        this.log.warn(
+          `extension tool "${tool.name}" conflicts with an existing tool, skipped (set EXTENSIONS_ALLOW_TOOL_OVERRIDE=1 to allow)`,
+        );
+        this.toolDiagnostics.push({
+          kind,
+          name: tool.name,
+          status: "skipped",
+          reason: "name conflicts with an existing tool",
+          tools: [tool.name],
+          entry: null,
+        });
+        continue;
+      }
+      if (taken) this.log.warn(`extension tool "${tool.name}" overrides an existing tool (allowed by config)`);
+      registry.register(tool, "extension");
       this.owned.add(tool.name);
+      this.registered.set(tool.name, tool);
     }
+  }
+
+  /** Runs an operator-approved extension change. Only the gateway calls this. */
+  async applyApproved(input: { action: ApprovalAction; name: string; url?: string }): Promise<string> {
+    if (input.action === "reload") {
+      const summary = await this.reload();
+      return `รีโหลด extension แล้ว\n${this.formatSummary(summary)}`;
+    }
+    if (input.action === "install") {
+      if (!input.name) throw new Error("install needs a name");
+      const installed = await this.hub.installByName(input.name, input.url);
+      const summary = await this.reload();
+      return `ติดตั้ง ${installed.kind} "${installed.name}" แล้ว\n${this.formatSummary(summary)}`;
+    }
+    if (!input.name) throw new Error("remove needs a name");
+    const kind = await this.hub.remove(input.name);
+    const summary = await this.reload();
+    return `ถอน ${kind} "${input.name}" แล้ว\n${this.formatSummary(summary)}`;
   }
 
   /** Re-reads skills, plugins and MCP servers, then re-registers their tools. */

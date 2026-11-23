@@ -17,6 +17,7 @@ let modelCalls = 0;
 let graphCalls = 0;
 const graphBodies = [];
 const modelRequests = [];
+const lineReplies = [];
 
 const stub = createServer((req, res) => {
   let body = "";
@@ -66,6 +67,13 @@ const stub = createServer((req, res) => {
           usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
         }),
       );
+      return;
+    }
+
+    if (req.url === "/v2/bot/message/reply" || req.url === "/v2/bot/message/push") {
+      lineReplies.push({ path: req.url, body: JSON.parse(body) });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({}));
       return;
     }
 
@@ -153,6 +161,10 @@ async function main() {
     FACEBOOK_PAGE_ACCESS_TOKEN: "smoke-page-token",
     FACEBOOK_GRAPH_BASE_URL: stubBase,
     FACEBOOK_GRAPH_VERSION: "v21.0",
+    LINE_CHANNEL_SECRET: "smoke-line-secret",
+    LINE_CHANNEL_ACCESS_TOKEN: "smoke-line-token",
+    LINE_ALLOWED_SOURCE_IDS: "Uallowed",
+    LINE_API_BASE_URL: stubBase,
   });
 
   const { loadConfig } = await import("../dist/config.js");
@@ -163,6 +175,9 @@ async function main() {
   const { createGateway } = await import("../dist/gateway/server.js");
   const { createLogger } = await import("../dist/log.js");
   const { UsageLedger } = await import("../dist/usage.js");
+  const { LineChannel } = await import("../dist/channels/line.js");
+  const { ApprovalQueue } = await import("../dist/extensions/approvals.js");
+  const { createHmac } = await import("node:crypto");
 
   const config = loadConfig();
   const log = createLogger("smoke");
@@ -173,7 +188,9 @@ async function main() {
   const ledger = new UsageLedger(config.dataDir, config.prices);
   await ledger.init();
   const harness = new AgentHarness({ config, store, catalog, tools, ledger, log });
-  const gateway = createGateway({ config, harness, log: createLogger("gateway") });
+  const line = new LineChannel(config.line, harness, createLogger("line"));
+  const approvals = new ApprovalQueue();
+  const gateway = createGateway({ config, harness, log: createLogger("gateway"), line, approvals });
 
   const port = await gateway.start(0, "127.0.0.1");
   const wsBase = `ws://127.0.0.1:${port}`;
@@ -374,7 +391,98 @@ async function main() {
     assert.equal(stored.scene, "night");
     check("agent.delete and agents.json persistence");
 
+    // 13. Extension changes proposed by an agent wait for the operator
+    approvals.request({
+      action: "install",
+      name: "demo-plugin",
+      sessionId: "board:agent:main",
+      agentId: "main",
+    });
+    socket.send(JSON.stringify({ type: "approvals.list" }));
+    const pending = await inbox.next((frame) => frame.type === "approvals.state", "approvals.state");
+    assert.equal(pending.requests.length, 1);
+    assert.equal(pending.writes, "confirm");
+    socket.send(JSON.stringify({ type: "approval.reject", id: pending.requests[0].id }));
+    const rejectResult = await inbox.next((frame) => frame.type === "approval.result", "approval.result");
+    assert.equal(rejectResult.ok, true, rejectResult.message);
+    assert.equal(approvals.list().length, 0, "a rejected request leaves the queue");
+    check("extension changes wait for an explicit operator decision");
+
     socket.close();
+
+    // 13. LINE channel: signed webhook, allowlist, dedupe, reply
+    const lineSignature = (body) =>
+      createHmac("sha256", "smoke-line-secret").update(body).digest("base64");
+    const lineWebhook = (payload, signature) =>
+      fetch(`http://127.0.0.1:${port}/webhooks/line`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(signature ? { "x-line-signature": signature } : {}),
+        },
+        body: payload,
+      });
+    const lineEvent = (eventId, text, userId = "Uallowed") =>
+      JSON.stringify({
+        destination: "Ubot",
+        events: [
+          {
+            type: "message",
+            webhookEventId: eventId,
+            replyToken: `reply-${eventId}`,
+            timestamp: Date.now(),
+            source: { type: "user", userId },
+            message: { type: "text", id: `msg-${eventId}`, text },
+          },
+        ],
+      });
+    const waitFor = async (predicate, label, timeoutMs = 6000) => {
+      const started = Date.now();
+      while (Date.now() - started < timeoutMs) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error(`timed out waiting for ${label}`);
+    };
+
+    const unsigned = await lineWebhook(lineEvent("evt-0", "hi"), "not-a-signature");
+    assert.equal(unsigned.status, 403);
+    const callsBeforeLine = modelCalls;
+    assert.equal(modelCalls, callsBeforeLine);
+    check("LINE webhook rejects an invalid x-line-signature");
+
+    const firstBody = lineEvent("evt-1", "สวัสดีจาก LINE");
+    const accepted = await lineWebhook(firstBody, lineSignature(firstBody));
+    assert.equal(accepted.status, 200);
+    await waitFor(() => lineReplies.length === 1, "the first LINE reply");
+    assert.equal(lineReplies[0].path, "/v2/bot/message/reply");
+    assert.equal(lineReplies[0].body.replyToken, "reply-evt-1");
+    assert.ok(lineReplies[0].body.messages[0].text.length > 0);
+    check("LINE: signed webhook named the agent and answered via the reply API");
+
+    const afterFirst = modelCalls;
+    const duplicate = await lineWebhook(firstBody, lineSignature(firstBody));
+    assert.equal(duplicate.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(lineReplies.length, 1, "a redelivered webhook must not answer twice");
+    assert.equal(modelCalls, afterFirst, "a redelivered webhook must not run another turn");
+    check("LINE: redelivered webhookEventId is ignored");
+
+    const strangerBody = lineEvent("evt-2", "hello", "Ustranger");
+    const stranger = await lineWebhook(strangerBody, lineSignature(strangerBody));
+    assert.equal(stranger.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(lineReplies.length, 1, "a sender outside LINE_ALLOWED_SOURCE_IDS gets no answer");
+    assert.equal(modelCalls, afterFirst, "a stranger must not reach the model");
+    check("LINE: senders outside the allowlist are ignored by default");
+
+    const status = await (
+      await fetch(`http://127.0.0.1:${port}/api/status`, { headers: { authorization: "Bearer smoke-token" } })
+    ).json();
+    assert.equal(status.line.webhookVerified, true);
+    assert.equal(status.line.replied, 1);
+    assert.equal(status.line.rejected, 1);
+    check("/api/status reports LINE as verified, replied and rejected counts");
   } finally {
     await gateway.stop();
     await new Promise((resolve) => stub.close(resolve));

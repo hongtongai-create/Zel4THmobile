@@ -25,6 +25,20 @@ export type TelegramConfig = {
   allowedChatIds: string[];
 };
 
+export type LineConfig = {
+  channelSecret: string;
+  channelAccessToken: string;
+  /** LINE user/group/room ids allowed to talk to the agent. Empty = nobody. */
+  allowedSourceIds: string[];
+  /** Office agent that answers LINE; null uses the gateway default. */
+  agentId: string | null;
+  apiBaseUrl: string;
+  webhookPath: string;
+};
+
+/** `confirm` queues agent-driven extension changes for operator approval. */
+export type ExtensionWriteMode = "confirm" | "allow" | "deny";
+
 export type Config = {
   gatewayToken: string;
   host: string;
@@ -33,12 +47,17 @@ export type Config = {
   defaultModel: string | null;
   facebook: FacebookConfig | null;
   telegram: TelegramConfig | null;
+  line: LineConfig | null;
   dataDir: string;
   boardDir: string;
   /** Where skills, plugins and mcp.json live (`EXTENSIONS_DIR`). */
   extensionsDir: string;
   /** clawhub registry index: an https URL, file: URL or local path. Null disables installing. */
   clawhubUrl: string | null;
+  /** Whether an agent may install/remove/reload extensions, and how. */
+  agentExtensionWrites: ExtensionWriteMode;
+  /** Allow an extension tool to shadow an existing tool name (off by default). */
+  allowToolOverride: boolean;
   maxIterations: number;
   historyLimit: number;
   /** USD per 1M tokens, from `MODEL_PRICES`. Empty when no prices are set. */
@@ -178,6 +197,32 @@ function buildTelegram(env: NodeJS.ProcessEnv): TelegramConfig | null {
   };
 }
 
+function buildLine(env: NodeJS.ProcessEnv): LineConfig | null {
+  const channelSecret = str(env, "LINE_CHANNEL_SECRET");
+  const channelAccessToken = str(env, "LINE_CHANNEL_ACCESS_TOKEN");
+  if (!channelSecret || !channelAccessToken) return null;
+  const rawPath = str(env, "LINE_WEBHOOK_PATH") ?? "/webhooks/line";
+  return {
+    channelSecret,
+    channelAccessToken,
+    allowedSourceIds: csv(env, "LINE_ALLOWED_SOURCE_IDS") ?? [],
+    agentId: str(env, "LINE_AGENT_ID"),
+    apiBaseUrl: str(env, "LINE_API_BASE_URL") ?? "https://api.line.me",
+    webhookPath: rawPath.startsWith("/") ? rawPath : `/${rawPath}`,
+  };
+}
+
+function extensionWrites(env: NodeJS.ProcessEnv): ExtensionWriteMode {
+  const value = (str(env, "EXTENSIONS_AGENT_WRITES") ?? "confirm").toLowerCase();
+  if (["allow", "on", "yes", "auto"].includes(value)) return "allow";
+  if (["deny", "off", "no", "denied"].includes(value)) return "deny";
+  return "confirm";
+}
+
+function flag(env: NodeJS.ProcessEnv, key: string): boolean {
+  return ["1", "true", "on", "yes"].includes((str(env, key) ?? "").toLowerCase());
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const gatewayToken = str(env, "GATEWAY_TOKEN");
   if (!gatewayToken) {
@@ -197,10 +242,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     defaultModel,
     facebook: buildFacebook(env),
     telegram: buildTelegram(env),
+    line: buildLine(env),
     dataDir: path.resolve(str(env, "DATA_DIR") ?? "data"),
     boardDir: path.resolve(str(env, "BOARD_DIR") ?? "board"),
     extensionsDir: path.resolve(str(env, "EXTENSIONS_DIR") ?? "extensions"),
     clawhubUrl: clawhubUrl(str(env, "CLAWHUB_URL")),
+    agentExtensionWrites: extensionWrites(env),
+    allowToolOverride: flag(env, "EXTENSIONS_ALLOW_TOOL_OVERRIDE"),
     maxIterations: Math.max(1, int(env, "MAX_ITERATIONS", 8)),
     historyLimit: Math.max(6, int(env, "HISTORY_LIMIT", 60)),
     prices: parsePrices(str(env, "MODEL_PRICES")),

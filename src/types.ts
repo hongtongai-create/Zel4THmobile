@@ -14,7 +14,7 @@ export type ChatMessage = {
   name?: string;
 };
 
-export type SessionChannel = "board" | "telegram" | "cli";
+export type SessionChannel = "board" | "telegram" | "line" | "cli";
 
 export type Session = {
   id: string;

@@ -41,6 +41,13 @@ const els = {
   agentReset: document.getElementById("agent-reset"),
   agentDelete: document.getElementById("agent-delete"),
   agentError: document.getElementById("agent-error"),
+  approvalsBtn: document.getElementById("approvals-btn"),
+  approvalCount: document.getElementById("approval-count"),
+  approvalSheet: document.getElementById("approval-sheet"),
+  approvalSheetClose: document.getElementById("approval-sheet-close"),
+  approvalList: document.getElementById("approval-list"),
+  approvalHint: document.getElementById("approval-hint"),
+  extensionList: document.getElementById("extension-list"),
   toolList: document.getElementById("tool-list"),
   toast: document.getElementById("toast"),
 };
@@ -70,6 +77,9 @@ const state = {
   chatTitle: "แชท",
   chatMeta: "no messages yet",
   activity: new Map(),
+  approvals: [],
+  diagnostics: [],
+  extensionWrites: "confirm",
   reconnectTimer: null,
   pingTimer: null,
   retries: 0,
@@ -322,6 +332,89 @@ function closeAgentSheet() {
   state.creating = false;
 }
 
+/* ---------- approvals ---------- */
+
+const WRITE_MODES = {
+  confirm: "โหมด: ต้องอนุมัติทุกครั้ง — agent ติดตั้ง/ถอน/รีโหลด extension เองไม่ได้",
+  allow: "โหมด: agent เปลี่ยน extension ได้เองโดยไม่ต้องอนุมัติ (EXTENSIONS_AGENT_WRITES=allow)",
+  deny: "โหมด: ปิดการเปลี่ยน extension จาก agent ทั้งหมด (EXTENSIONS_AGENT_WRITES=deny)",
+};
+
+function closeApprovalSheet() {
+  els.approvalSheet.classList.remove("open");
+  els.approvalSheet.setAttribute("aria-hidden", "true");
+}
+
+function approvalLabel(request) {
+  const head = request.name ? `${request.action} · ${request.name}` : request.action;
+  return head;
+}
+
+function renderApprovals(requests) {
+  state.approvals = Array.isArray(requests) ? requests : [];
+  const pending = state.approvals.filter((request) => request.status === "pending");
+  els.approvalCount.textContent = String(pending.length);
+  els.approvalsBtn.hidden = pending.length === 0;
+  els.approvalHint.textContent = WRITE_MODES[state.extensionWrites] ?? WRITE_MODES.confirm;
+  els.approvalList.innerHTML = "";
+
+  if (pending.length === 0) {
+    els.approvalList.append(el("p", "muted", "ไม่มีคำขอที่รออนุมัติ"));
+    if (els.approvalSheet.classList.contains("open")) closeApprovalSheet();
+    return;
+  }
+
+  for (const request of pending) {
+    const card = el("div", "approval-card");
+    const agent = findAgent(request.agentId);
+    const meta = [
+      agent ? `${agent.emoji || "🤖"} ${agent.name}` : request.sessionId,
+      request.action === "install"
+        ? "ติดตั้งโค้ดใหม่จาก registry"
+        : request.action === "remove"
+          ? "ถอนออกจากเครื่อง"
+          : "โหลด extension ใหม่ทั้งหมด",
+    ].join(" · ");
+
+    const actions = el("div", "approval-actions");
+    const approve = el("button", "primary", "อนุมัติ");
+    approve.type = "button";
+    approve.addEventListener("click", () => {
+      approve.disabled = true;
+      send({ type: "approval.approve", id: request.id });
+    });
+    const reject = el("button", "ghost danger", "ปฏิเสธ");
+    reject.type = "button";
+    reject.addEventListener("click", () => send({ type: "approval.reject", id: request.id }));
+    actions.append(approve, reject);
+
+    card.append(el("strong", null, approvalLabel(request)), el("p", "muted", meta), actions);
+    els.approvalList.append(card);
+  }
+}
+
+function openApprovalSheet() {
+  renderApprovals(state.approvals);
+  els.approvalSheet.classList.add("open");
+  els.approvalSheet.setAttribute("aria-hidden", "false");
+}
+
+function renderExtensions(diagnostics) {
+  state.diagnostics = Array.isArray(diagnostics) ? diagnostics : [];
+  els.extensionList.innerHTML = "";
+  if (state.diagnostics.length === 0) {
+    els.extensionList.append(el("li", "muted", "ไม่มี extension"));
+    return;
+  }
+  for (const entry of state.diagnostics) {
+    const li = el("li", `ext ${entry.status}`);
+    li.append(el("span", "ext-name", `${entry.kind}: ${entry.name}`));
+    li.append(el("span", "ext-reason", entry.reason));
+    li.title = entry.reason;
+    els.extensionList.append(li);
+  }
+}
+
 /* ---------- office ---------- */
 
 function renderOffice() {
@@ -561,6 +654,43 @@ function checklist(name, items, selected) {
   return wrap;
 }
 
+/**
+ * Lets the operator choose the three real states instead of guessing what an
+ * unchecked box means: every installed item, an explicit list, or none.
+ */
+function selectionField(labelText, name, items, selected) {
+  const mode = selected == null ? "all" : selected.length === 0 ? "none" : "pick";
+  const wrap = el("div", "selection");
+  const modes = el("div", "tri");
+  const list = checklist(name, items, selected);
+  list.hidden = mode !== "pick";
+
+  for (const [value, text] of [
+    ["all", "ใช้ทั้งหมด"],
+    ["pick", "เลือกเอง"],
+    ["none", "ไม่ใช้"],
+  ]) {
+    const label = el("label", "tri-opt");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = `${name}-mode`;
+    radio.value = value;
+    radio.checked = value === mode;
+    radio.addEventListener("change", () => {
+      list.hidden = value !== "pick";
+    });
+    label.append(radio, el("span", null, text));
+    modes.append(label);
+  }
+
+  wrap.append(
+    modes,
+    el("p", "hint", "ใช้ทั้งหมด = รวมของที่ติดตั้งใหม่ภายหลัง · เลือกเอง = เฉพาะที่ติ๊ก · ไม่ใช้ = ปิดกลุ่มนี้ทั้งหมด"),
+    list,
+  );
+  return formField(labelText, wrap);
+}
+
 function openAgentSheet(id) {
   const agent = id ? findAgent(id) : null;
   state.sheetAgentId = agent?.id ?? null;
@@ -616,11 +746,11 @@ function renderAgentForm(agent) {
     ),
   );
 
-  form.append(formField("Skills", checklist("agent-skill", state.extensions.skills ?? [], agent ? agent.skills : null)));
+  form.append(selectionField("Skills", "agent-skill", state.extensions.skills ?? [], agent ? agent.skills : null));
   form.append(
-    formField("Plugins", checklist("agent-plugin", state.extensions.plugins ?? [], agent ? agent.plugins : null)),
+    selectionField("Plugins", "agent-plugin", state.extensions.plugins ?? [], agent ? agent.plugins : null),
   );
-  form.append(formField("MCP", checklist("agent-mcp", state.extensions.mcp ?? [], agent ? agent.mcp : null)));
+  form.append(selectionField("MCP", "agent-mcp", state.extensions.mcp ?? [], agent ? agent.mcp : null));
 
   els.agentForm.append(form);
 }
@@ -630,7 +760,15 @@ function readAgentForm() {
   const checked = (name) =>
     [...els.agentForm.querySelectorAll(`input[name="${name}"]:checked`)].map((node) => node.value);
 
-  const payload = {
+  // null = every installed item (including future installs), [] = this kind off.
+  const selection = (key) => {
+    const mode = els.agentForm.querySelector(`input[name="agent-${key}-mode"]:checked`)?.value ?? "all";
+    if (mode === "all") return null;
+    if (mode === "none") return [];
+    return checked(`agent-${key}`);
+  };
+
+  return {
     name: val("agent-name").trim(),
     emoji: val("agent-emoji").trim(),
     role: val("agent-role").trim(),
@@ -638,12 +776,10 @@ function readAgentForm() {
     color: val("agent-color") || null,
     sprite: val("agent-sprite") || null,
     identity: val("agent-identity"),
+    skills: selection("skill"),
+    plugins: selection("plugin"),
+    mcp: selection("mcp"),
   };
-  // Only send a selection when the extension kind exists, so a later install is not silently disabled.
-  if ((state.extensions.skills ?? []).length > 0) payload.skills = checked("agent-skill");
-  if ((state.extensions.plugins ?? []).length > 0) payload.plugins = checked("agent-plugin");
-  if ((state.extensions.mcp ?? []).length > 0) payload.mcp = checked("agent-mcp");
-  return payload;
 }
 
 function saveAgent() {
@@ -828,6 +964,9 @@ function handleFrame(frame) {
       state.tools = frame.tools ?? [];
       els.toolList.textContent = `tools: ${state.tools.join(", ") || "none"}`;
       if (frame.extensions) state.extensions = frame.extensions;
+      state.extensionWrites = frame.extensionWrites ?? state.extensionWrites;
+      renderExtensions(frame.diagnostics ?? []);
+      renderApprovals(frame.approvals ?? []);
       renderModels(frame.models ?? [], frame.defaultModel ?? null);
 
       const profiles = frame.agents ?? [];
@@ -844,8 +983,21 @@ function handleFrame(frame) {
       setChatHeader(agent ? agent.name : "แชท", "loading…");
       send({ type: "sessions.list" });
       send({ type: "session.history", sessionId: state.sessionId });
+      send({ type: "approvals.list" });
       break;
     }
+
+    case "approvals.state":
+      state.extensionWrites = frame.writes ?? state.extensionWrites;
+      renderExtensions(frame.diagnostics ?? []);
+      renderApprovals(frame.requests ?? []);
+      break;
+
+    case "approval.result":
+      toast(frame.message ?? (frame.ok ? "อนุมัติแล้ว" : "ไม่สำเร็จ"));
+      send({ type: "approvals.list" });
+      if (frame.ok) send({ type: "agents.list" });
+      break;
 
     case "agents.state":
       applyAgentState(frame);
@@ -935,6 +1087,8 @@ function handleAgentEvent(event) {
       if (agentOfSession) setActivity(agentOfSession, { busy: false, text: "" });
       if (isCurrent) setBusy(false);
       send({ type: "sessions.list" });
+      // The agent may have queued an extension change during this turn.
+      send({ type: "approvals.list" });
       break;
     default:
       break;
@@ -1004,6 +1158,8 @@ els.viewToggle.addEventListener("click", () => setView(state.view === "office" ?
 els.newAgent.addEventListener("click", () => openAgentSheet(null));
 els.addAgent.addEventListener("click", () => openAgentSheet(null));
 els.agentSave.addEventListener("click", saveAgent);
+els.approvalsBtn.addEventListener("click", openApprovalSheet);
+els.approvalSheetClose.addEventListener("click", closeApprovalSheet);
 
 els.agentChat.addEventListener("click", () => {
   const agent = findAgent(state.sheetAgentId);
@@ -1034,6 +1190,7 @@ document.addEventListener("keydown", (event) => {
   closeDrawer();
   closeModelSheet();
   closeAgentSheet();
+  closeApprovalSheet();
 });
 
 /* ---------- app lifecycle ---------- */

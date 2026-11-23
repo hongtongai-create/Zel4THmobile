@@ -47,6 +47,9 @@
         <div class="section-title">Sessions</div>
         <ul class="sessions" id="session-list"></ul>
 
+        <div class="section-title">Extensions</div>
+        <ul class="ext-list" id="extension-list"></ul>
+
         <button class="ghost wide" id="install" type="button" hidden>Install as app</button>
 
         <div class="foot">
@@ -78,6 +81,9 @@
           </div>
           <div class="office-bar">
             <div class="scenes" id="scene-picker"></div>
+            <button class="ghost approvals" id="approvals-btn" type="button" hidden>
+              รออนุมัติ <span id="approval-count">0</span>
+            </button>
             <button class="primary add-agent" id="add-agent" type="button" aria-label="Create agent">＋</button>
           </div>
         </section>
@@ -136,6 +142,17 @@
           <button class="ghost danger" id="agent-delete" type="button">ลบ agent</button>
         </div>
         <p class="error" id="agent-error"></p>
+      </div>
+    </div>
+
+    <div class="sheet" id="approval-sheet" aria-label="Pending approvals" aria-hidden="true">
+      <div class="sheet-head">
+        <span>รออนุมัติ</span>
+        <button class="icon-btn" id="approval-sheet-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="hint" id="approval-hint"></p>
+        <div id="approval-list"></div>
       </div>
     </div>
 

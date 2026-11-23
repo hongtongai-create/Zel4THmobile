@@ -4,8 +4,10 @@ import process from "node:process";
 import { createInterface } from "node:readline/promises";
 import { AgentHarness } from "./agent.js";
 import { AgentRegistry } from "./agents.js";
+import { LineChannel } from "./channels/line.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { loadConfig, loadDotEnv } from "./config.js";
+import { ApprovalQueue } from "./extensions/approvals.js";
 import { ExtensionManager } from "./extensions/index.js";
 import { HubClient, describeEntry } from "./extensions/hub.js";
 import { createGateway } from "./gateway/server.js";
@@ -33,12 +35,18 @@ async function bootstrap(options: { extensions?: boolean } = {}) {
   const ledger = new UsageLedger(config.dataDir, config.prices);
   await ledger.init();
 
+  const approvals = new ApprovalQueue();
   let extensions: ExtensionManager | null = null;
   if (options.extensions) {
     extensions = new ExtensionManager(config, createLogger("extensions"));
     await extensions.init();
     extensions.register(tools);
-    tools.register(createExtensionsTool(extensions));
+    tools.register(
+      createExtensionsTool(extensions, {
+        approvals,
+        writes: config.agentExtensionWrites,
+      }),
+    );
   }
 
   const harness = new AgentHarness({
@@ -50,7 +58,7 @@ async function bootstrap(options: { extensions?: boolean } = {}) {
     log: createLogger("agent"),
     extensions: extensions ?? undefined,
   });
-  return { config, catalog, store, tools, ledger, extensions, harness, agents };
+  return { config, catalog, store, tools, ledger, extensions, harness, agents, approvals };
 }
 
 function printModels(catalog: ModelCatalog): void {
@@ -127,7 +135,7 @@ async function runUsage(): Promise<void> {
 }
 
 async function runGateway(): Promise<void> {
-  const { config, catalog, tools, harness, extensions, agents } = await bootstrap({ extensions: true });
+  const { config, catalog, tools, harness, extensions, agents, approvals } = await bootstrap({ extensions: true });
 
   if (catalog.isEmpty) {
     log.warn("no model providers configured - set OPENAI_API_KEY, OPENROUTER_API_KEY, OLLAMA_ENABLED=1 or LLM_BASE_URL");
@@ -136,13 +144,17 @@ async function runGateway(): Promise<void> {
   }
   log.info(`tools: ${tools.names().join(", ") || "none"}`);
 
-  const gateway = createGateway({ config, harness, log: createLogger("gateway"), agents });
+  const line = config.line ? new LineChannel(config.line, harness, createLogger("line"), agents) : null;
+  const gateway = createGateway({ config, harness, log: createLogger("gateway"), agents, approvals, line: line ?? undefined });
   const port = await gateway.start();
 
   console.log("");
   console.log(`  clawgate gateway listening on http://${config.host}:${port}`);
   console.log(`  board:  http://localhost:${port}/?token=${encodeURIComponent(config.gatewayToken)}`);
   console.log(`  socket: ws://localhost:${port}/ws`);
+  if (config.line) {
+    console.log(`  line:   POST ${config.line.webhookPath} (signature-checked webhook; expose it through a tunnel, not the phone itself)`);
+  }
   console.log("");
 
   let telegram: TelegramChannel | null = null;
@@ -151,6 +163,14 @@ async function runGateway(): Promise<void> {
     telegram.start();
   } else {
     log.warn("telegram disabled - set TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_CHAT_IDS");
+  }
+
+  if (config.line) {
+    log.info(
+      `line channel ready at ${config.line.webhookPath} (allowed sources: ${config.line.allowedSourceIds.join(", ") || "none - set LINE_ALLOWED_SOURCE_IDS"})`,
+    );
+  } else {
+    log.warn("line disabled - set LINE_CHANNEL_SECRET and LINE_CHANNEL_ACCESS_TOKEN");
   }
 
   const shutdown = async (signal: string) => {
@@ -257,6 +277,17 @@ async function runExtensions(args: string[]): Promise<void> {
       }
       return;
     }
+    case "diagnostics": {
+      const manager = new ExtensionManager(config, createLogger("extensions"));
+      try {
+        await manager.init();
+        console.log(`extensions dir: ${config.extensionsDir}`);
+        console.log(manager.formatDiagnostics());
+      } finally {
+        await manager.close();
+      }
+      return;
+    }
     case "search": {
       const query = args.slice(1).join(" ");
       const entries = await hub.search(query);
@@ -294,6 +325,7 @@ async function runExtensions(args: string[]): Promise<void> {
 usage:
   clawgate extensions            list installed skills, plugins and MCP servers
   clawgate extensions search Q   search the clawhub registry
+  clawgate extensions diagnostics  why each plugin/skill is loaded, skipped or failed
   clawgate extensions install N  install one (skill, plugin or mcp)
   clawgate extensions remove N   remove one`);
       process.exit(1);

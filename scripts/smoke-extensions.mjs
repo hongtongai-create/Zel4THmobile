@@ -71,6 +71,25 @@ async function main() {
   const mcpServerPath = path.join(base, "demo-mcp.mjs");
   const registryPath = path.join(base, "clawhub.json");
 
+  await mkdir(path.join(extensionsDir, "plugins", "zz-broken"), { recursive: true });
+  await writeFile(
+    path.join(extensionsDir, "plugins", "zz-broken", "index.mjs"),
+    'throw new Error("plugin exploded on import");\n',
+    "utf8",
+  );
+  await mkdir(path.join(extensionsDir, "plugins", "zz-noentry"), { recursive: true });
+  await writeFile(
+    path.join(extensionsDir, "plugins", "zz-noentry", "plugin.json"),
+    JSON.stringify({ name: "zz-noentry", entry: "index.mjs" }),
+    "utf8",
+  );
+  await mkdir(path.join(extensionsDir, "plugins", "zz-wrongshape"), { recursive: true });
+  await writeFile(
+    path.join(extensionsDir, "plugins", "zz-wrongshape", "index.mjs"),
+    'export const tools = [{ name: "half-tool", description: "no handler" }];\n',
+    "utf8",
+  );
+
   await mkdir(extensionsDir, { recursive: true });
   await writeFile(mcpServerPath, MCP_SERVER, "utf8");
 
@@ -116,6 +135,7 @@ async function main() {
   const { ExtensionManager } = await import("../dist/extensions/index.js");
   const { ToolRegistry, createToolRegistry } = await import("../dist/tools/index.js");
   const { createExtensionsTool } = await import("../dist/tools/extensions.js");
+  const { ApprovalQueue } = await import("../dist/extensions/approvals.js");
   const { AgentHarness } = await import("../dist/agent.js");
   const { ModelCatalog } = await import("../dist/models.js");
   const { SessionStore } = await import("../dist/store.js");
@@ -132,12 +152,31 @@ async function main() {
     await manager.init();
     const tools = createToolRegistry(config);
     manager.register(tools);
-    tools.register(createExtensionsTool(manager));
+    // Setup installs run directly; the approval path is exercised further down.
+    tools.register(createExtensionsTool(manager, { writes: "allow" }));
 
     assert.deepEqual(manager.summary().skills, []);
     assert.deepEqual(manager.summary().mcp, []);
     assert.equal(manager.promptSections().length, 0);
     check("empty extensions dir loads cleanly");
+
+    // Loader diagnostics: a broken, incomplete or malformed plugin says why.
+    const diagnostics = manager.diagnostics();
+    const find = (name) => diagnostics.find((entry) => entry.name === name);
+    assert.equal(find("zz-broken").status, "failed");
+    assert.match(find("zz-broken").reason, /import failed/);
+    assert.equal(find("zz-noentry").status, "skipped");
+    assert.match(find("zz-noentry").reason, /not found/);
+    assert.equal(find("zz-wrongshape").status, "skipped");
+    assert.match(find("zz-wrongshape").reason, /do not match/);
+    assert.match(manager.formatDiagnostics(), /plugin:zz-broken/);
+    const viaTool = await tools.invoke("extensions", JSON.stringify({ action: "diagnostics" }), {
+      sessionId: "cli:smoke",
+      log,
+    });
+    assert.equal(viaTool.ok, true, viaTool.output);
+    assert.match(viaTool.output, /zz-wrongshape/);
+    check("loader diagnostics explain skipped and failed plugins");
 
     // The agent tool installs from the registry and reloads in one step.
     const extensionsTool = tools.names().includes("extensions");
@@ -172,6 +211,22 @@ async function main() {
     const pluginCall = await tools.invoke("shout", JSON.stringify({ text: "hi" }), { sessionId: "cli:smoke", log });
     assert.equal(pluginCall.ok, true, pluginCall.output);
     assert.equal(pluginCall.output, "HI");
+
+    // Permissions are enforced when the tool runs, not only in the prompt.
+    const deniedCall = await tools.invoke("shout", JSON.stringify({ text: "hi" }), {
+      sessionId: "cli:smoke",
+      log,
+      allowedTools: new Set(),
+    });
+    assert.equal(deniedCall.ok, false);
+    assert.match(deniedCall.output, /Permission denied/);
+    const allowedCall = await tools.invoke("shout", JSON.stringify({ text: "hi" }), {
+      sessionId: "cli:smoke",
+      log,
+      allowedTools: new Set(["shout"]),
+    });
+    assert.equal(allowedCall.ok, true, allowedCall.output);
+    check("extension tool permission is enforced at invoke time");
 
     const mcpCall = await tools.invoke("demo__echo", JSON.stringify({ text: "hello" }), { sessionId: "cli:smoke", log });
     assert.equal(mcpCall.ok, true, mcpCall.output);
@@ -214,6 +269,52 @@ async function main() {
     const installed = await readFile(path.join(extensionsDir, "installed.json"), "utf8");
     assert.match(installed, /note-skill/);
     check("installed.json manifest records installed extensions");
+
+    // A plugin must not silently replace a tool that already exists.
+    tools.register({
+      name: "shout",
+      description: "builtin shout",
+      parameters: { type: "object", properties: {} },
+      async handler() {
+        return "builtin";
+      },
+    });
+    await manager.reload();
+    const collision = manager.diagnostics().find((entry) => entry.status === "skipped" && /conflicts/.test(entry.reason));
+    assert.ok(collision, "name collision must be reported");
+    assert.equal(collision.name, "shout");
+    const survivor = await tools.invoke("shout", "{}", { sessionId: "cli:smoke", log });
+    assert.equal(survivor.output, "builtin", "the built-in tool must keep its name");
+    check("plugin cannot override a built-in tool by default");
+
+    // Mutating actions wait for an operator decision.
+    const approvals = new ApprovalQueue();
+    tools.register(createExtensionsTool(manager, { approvals, writes: "confirm" }));
+    const queued = await tools.invoke(
+      "extensions",
+      JSON.stringify({ action: "install", name: "note-skill" }),
+      { sessionId: "cli:smoke", log },
+    );
+    assert.equal(queued.ok, true, queued.output);
+    assert.match(queued.output, /Approval required/);
+    assert.equal(approvals.list().length, 1);
+    const request = approvals.list()[0];
+    assert.equal(request.action, "install");
+    assert.equal(request.name, "note-skill");
+    const approved = approvals.approve(request.id);
+    assert.ok(approved, "approving a pending request must resolve it");
+    const applied = await manager.applyApproved(approved);
+    assert.match(applied, /note-skill/);
+    assert.equal(approvals.list().length, 0);
+    check("extension install is queued until the operator approves");
+
+    tools.register(createExtensionsTool(manager, { approvals, writes: "deny" }));
+    const blocked = await tools.invoke("extensions", JSON.stringify({ action: "reload" }), {
+      sessionId: "cli:smoke",
+      log,
+    });
+    assert.match(blocked.output, /blocks agent-driven/);
+    check("EXTENSIONS_AGENT_WRITES=deny blocks every mutating action");
   } finally {
     await manager.close();
     await rm(base, { recursive: true, force: true });

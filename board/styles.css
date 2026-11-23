@@ -1173,3 +1173,149 @@ button.ghost.danger {
     padding: 12px 24px 16px;
   }
 }
+
+/* ---------- extension selection (null = all, [] = none) ---------- */
+
+.selection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tri {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tri-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.tri-opt input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.tri-opt:has(input:checked) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.selection .hint,
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.checklist[hidden] {
+  display: none;
+}
+
+/* ---------- approvals ---------- */
+
+.office-bar .approvals {
+  border-color: #b98a2f;
+  color: #f4c97a;
+  white-space: nowrap;
+  font-size: 13px;
+  padding: 8px 12px;
+}
+
+.office-bar .approvals span {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #f4c97a;
+  color: #1a1206;
+  font-weight: 700;
+  text-align: center;
+}
+
+.approval-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.approval-card strong {
+  display: block;
+  font-family: var(--mono);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.approval-card p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.approval-actions button {
+  flex: 1;
+  min-height: 44px;
+}
+
+/* ---------- extension diagnostics ---------- */
+
+.ext-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ext-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  font-size: 12px;
+}
+
+.ext-name {
+  font-family: var(--mono);
+  color: var(--text);
+  word-break: break-word;
+}
+
+.ext-reason {
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.ext.loaded {
+  border-color: var(--accent-dim);
+}
+
+.ext.skipped,
+.ext.failed {
+  border-color: #4a2a2a;
+}
+
+.ext.failed .ext-name {
+  color: var(--danger);
+}

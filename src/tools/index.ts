@@ -6,7 +6,18 @@ import { createFacebookTool } from "./facebook.js";
 export type ToolContext = {
   sessionId: string;
   log: Logger;
+  /** Set when a character runs the turn; used for audit and approvals. */
+  agentId?: string | null;
+  /**
+   * Extension tools this turn may call. Built-in tools are always allowed;
+   * anything from a plugin or MCP server is checked here at invoke time, not
+   * only hidden from the prompt.
+   */
+  allowedTools?: Set<string>;
 };
+
+/** Where a tool came from; extension tools are filtered per agent. */
+export type ToolSource = "builtin" | "extension";
 
 export type Tool = {
   name: string;
@@ -22,13 +33,25 @@ export type ToolOutcome = {
 
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>();
+  private readonly sources = new Map<string, ToolSource>();
 
-  register(tool: Tool): void {
+  register(tool: Tool, source: ToolSource = "builtin"): void {
     this.tools.set(tool.name, tool);
+    this.sources.set(tool.name, source);
+  }
+
+  sourceOf(name: string): ToolSource | null {
+    return this.sources.get(name) ?? null;
+  }
+
+  /** The tool currently registered under this name, if any. */
+  get(name: string): Tool | undefined {
+    return this.tools.get(name);
   }
 
   /** Used when extensions reload: their old tools must leave the registry first. */
   unregister(name: string): boolean {
+    this.sources.delete(name);
     return this.tools.delete(name);
   }
 
@@ -62,6 +85,19 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) {
       return { ok: false, output: `Unknown tool "${name}". Available tools: ${this.names().join(", ") || "none"}` };
+    }
+
+    // Enforced here, so a persona that ignores its prompt still cannot reach
+    // an extension another agent was given access to.
+    if (
+      ctx.allowedTools &&
+      this.sourceOf(name) === "extension" &&
+      !ctx.allowedTools.has(name)
+    ) {
+      return {
+        ok: false,
+        output: `Permission denied: tool "${name}" is not enabled for this agent. Its skills/plugins/MCP selection does not include it.`,
+      };
     }
 
     let args: Record<string, unknown> = {};

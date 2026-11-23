@@ -19,6 +19,8 @@ Board(WS)─┘        │
 | `src/tools/` | tool registry, tool `facebook_post` (Graph API) และ tool `extensions` (ติดตั้ง/ถอน/ค้นหา extension) |
 | `src/extensions/` | ระบบส่วนขยาย: skills (markdown), plugins (JS), MCP servers (stdio) และ clawhub client |
 | `src/channels/telegram.ts` | long-polling Telegram พร้อมคำสั่ง `/model`, `/models`, `/reset`, `/status` |
+| `src/channels/line.ts` | LINE Messaging API webhook (ตรวจ signature, allowlist, กัน event ซ้ำ, reply/push) |
+| `src/extensions/approvals.ts` | คิวอนุมัติสำหรับการติดตั้ง/ถอน/รีโหลด extension ที่ agent ขอ |
 | `src/gateway/server.ts` | HTTP + WebSocket gateway (ตรวจ token ก่อน upgrade) และเสิร์ฟ board |
 | `src/store.ts` | เก็บ session เป็นไฟล์ JSON ใน `data/sessions/` |
 | `src/usage.ts` | บันทึก token ต่อ turn และประมาณค่าใช้จ่ายต่อ model/provider (`data/usage.jsonl` + `clawgate usage`) |
@@ -121,6 +123,40 @@ TELEGRAM_ALLOWED_CHAT_IDS=123456789     # ว่าง = ไม่มีใค�
 
 ว่างไว้แล้วจะถูกปฏิเสธทุก chat — ต้องใส่ chat id เสมอ บอทจะส่ง `typing` ระหว่างที่ agent ทำงาน
 และตอบกลับเป็น plain text (ตัดให้พอดี 4000 ตัวอักษรต่อข้อความ)
+
+## LINE
+
+เชื่อม LINE Official Account (Messaging API) ให้คุยกับ agent/ออฟฟิศตัวเดียวกับ Telegram —
+ใช้ model, tools, session และ agent profile ชุดเดียวกัน ไม่มี runtime แยก
+
+1. สร้าง channel ที่ https://developers.line.biz → เลือก **Messaging API** → ออก
+   *Channel secret* และ *Channel access token (long-lived)*
+2. ใส่ใน `.env`:
+
+```bash
+LINE_CHANNEL_SECRET=...
+LINE_CHANNEL_ACCESS_TOKEN=...
+LINE_ALLOWED_SOURCE_IDS=Uxxxxxxxxxxxxxxxx   # ว่าง = ไม่มีใครคุยได้
+LINE_AGENT_ID=main                          # agent ที่ตอบ (ไม่ใส่ = main)
+# LINE_WEBHOOK_PATH=/webhooks/line
+```
+
+3. เปิด webhook URL เป็น **https** ที่ชี้มาที่ gateway เช่น
+   `https://your-tunnel.example/webhooks/line` (Cloudflare Tunnel / reverse proxy ที่มี TLS)
+   แล้วกด **Verify** ในคอนโซล LINE
+
+สิ่งที่โค้ดทำ:
+
+- ตรวจ `x-line-signature` = HMAC-SHA256 ของ **raw body** ด้วย channel secret ก่อน parse
+  (ผิด = `403`, ไม่แตะโมเดล)
+- ตอบ `200` ทันที แล้วค่อยรัน turn ใน background เพื่อไม่ให้ LINE retry เพราะ webhook ช้า
+- กัน event ซ้ำด้วย `webhookEventId` (จำ 500 รายการล่าสุด)
+- ผู้ส่งที่ไม่อยู่ใน `LINE_ALLOWED_SOURCE_IDS` ถูกเมินและ log ไว้ (default deny)
+- session แยกเป็น `line:<userId|groupId|roomId>` ไม่ปนกับ Telegram/บอร์ด
+- ส่งคำตอบด้วย reply token ก่อน ถ้า token หมดอายุจะ fallback ไป push API
+
+สถานะจริงดูได้ที่ `GET /api/status` → `line: { configured, webhookVerified, events, replied, duplicates, rejected, lastEventAt }`
+ค่า ENV ที่มีอยู่ไม่ถือว่า “ผ่าน” — `webhookVerified` จะเป็น true หลังมี request ที่ signature ถูกต้องจริงเท่านั้น
 
 ## Facebook
 
@@ -250,11 +286,27 @@ node dist/cli.js extensions remove clock       # ถอนออก
 
 ```json
 {"action":"search","query":"time"}
-{"action":"install","name":"clock"}
 {"action":"list"}
+{"action":"diagnostics"}
+{"action":"install","name":"clock"}
 {"action":"remove","name":"clock"}
 {"action":"reload"}
 ```
+
+### ทำไม plugin ไม่ขึ้น / สิทธิ์ของ agent
+
+`npm run build && node dist/cli.js extensions diagnostics` (หรือ `{"action":"diagnostics"}`)
+แสดงทุกโฟลเดอร์ที่เจอพร้อมสถานะ `loaded` / `skipped` / `failed` และเหตุผล เช่น ไม่มี entry module,
+import แล้ว throw, export ไม่ตรงสัญญา `{ name, description, handler }` หรือชื่อ tool ชนกับของเดิม
+รายงานนี้อยู่ใน `ready` frame ของบอร์ดด้วย (เมนู ☰ → Extensions) และใน `GET /api/status`
+
+- **สิทธิ์ถูกบังคับตอนเรียก tool จริง** ไม่ใช่แค่ซ่อนจาก prompt: `ToolRegistry.invoke()` ปฏิเสธ
+  extension tool ที่ไม่ได้อยู่ใน selection ของ agent (`skills`/`plugins`/`mcp`)
+- **plugin แทนที่ tool เดิมไม่ได้โดยปริยาย** — ชื่อชนจะถูกข้ามและบันทึกใน diagnostics
+  เปิดได้ด้วย `EXTENSIONS_ALLOW_TOOL_OVERRIDE=1`
+- **การเปลี่ยน extension ต้องอนุมัติ**: `EXTENSIONS_AGENT_WRITES=confirm` (ค่าเริ่มต้น) ทำให้
+  `install`/`remove`/`reload` จาก agent ถูกพักไว้ในคิว แล้วขึ้นปุ่ม **รออนุมัติ** บนบอร์ดให้กดอนุมัติ/ปฏิเสธ
+  (`allow` = ทำทันที, `deny` = ห้ามทั้งหมด) คำขออยู่ในหน่วยความจำและหมดอายุใน 10 นาที
 
 การติดตั้งตรวจชื่อ (`[a-z0-9._-]`), ปฏิเสธ path ที่มี `..` หรือ absolute, จำกัดขนาดไฟล์ 512 KB
 และ 40 ไฟล์ต่อ entry — registry ยังเป็นโค้ดที่รันได้ (plugin) จึงควรใช้ registry ที่คุณควบคุมเอง
@@ -277,6 +329,9 @@ board เปิด WebSocket ไปที่ `ws://<host>/ws?token=<GATEWAY_TOKE
 | `{type:"session.history", sessionId}` | ขอประวัติ |
 | `{type:"session.reset", sessionId}` | ล้างประวัติ |
 | `{type:"ping"}` | health check |
+| `{type:"approvals.list"}` | ขอคิวอนุมัติ + diagnostics ปัจจุบัน |
+| `{type:"approval.approve", id}` | อนุมัติคำขอ (ติดตั้ง/ถอน/รีโหลด extension) |
+| `{type:"approval.reject", id}` | ปฏิเสธคำขอ |
 
 ฝั่ง gateway → board:
 
@@ -288,6 +343,8 @@ board เปิด WebSocket ไปที่ `ws://<host>/ws?token=<GATEWAY_TOKE
 | `{type:"event", event:{type:"tool.result", ok, preview}}` | ผล tool |
 | `{type:"event", event:{type:"assistant.message", text}}` | คำตอบ |
 | `{type:"event", event:{type:"turn.end", iterations, usage, costUsd}}` | จบ turn พร้อม token รวมและค่าใช้จ่ายโดยประมาณ (`costUsd` = `null` ถ้ายังไม่ตั้งราคา) |
+| `{type:"approvals.state", requests, writes, diagnostics}` | คิวอนุมัติเปลี่ยน (broadcast) |
+| `{type:"approval.result", id, ok, message}` | ผลของการอนุมัติ/ปฏิเสธ |
 | `{type:"error", message}` | ข้อผิดพลาด |
 
  eventosถูก broadcast ให้ทุก board client ที่ผ่านการยืนยันตัวตน
@@ -319,6 +376,9 @@ health/board assets, การปฏิเสธ token ผิด, การร�
 - `TELEGRAM_ALLOWED_CHAT_IDS` ว่าง = ไม่มีใครใช้งานได้ ถ้าต้องการเปิดให้ใครเพิ่ม ให้ใส่ chat id ของคนนั้น
   (รวมถึงการเพิ่มบอทเข้ากลุ่ม ซึ่งจะได้ chat id เป็นค่าลบ)
 - ข้อมูล session เก็บเป็นไฟล์ใน `data/` (ถูก gitignore) ลบโฟลเดอร์นี้เพื่อล้างทั้งหมด
+- LINE webhook ไม่ใช้ `GATEWAY_TOKEN` แต่เชื่อถือ signature ของ LINE เท่านั้น — อย่าเปิด path นี้
+  ออกสู่อินเทอร์เน็ตโดยไม่มี HTTPS และควรตั้ง `LINE_ALLOWED_SOURCE_IDS` เสมอ
+- plugin รันในโปรเซสเดียวกับ gateway: การอนุมัติควรอ่านชื่อ/แหล่งที่มาของ extension ก่อนกดทุกครั้ง
 
 ## Agents and the office view
 

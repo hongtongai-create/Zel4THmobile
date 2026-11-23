@@ -6,7 +6,9 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AgentHarness } from "../agent.js";
 import { AgentRegistry } from "../agents.js";
+import type { LineChannel } from "../channels/line.js";
 import type { Config } from "../config.js";
+import type { ApprovalQueue } from "../extensions/approvals.js";
 import type { Logger } from "../log.js";
 import { loadOfficeAssets, type OfficeAssets } from "../office.js";
 import type { AgentEvent, SessionChannel } from "../types.js";
@@ -52,14 +54,30 @@ type GatewayOptions = {
   harness: AgentHarness;
   log: Logger;
   agents?: AgentRegistry;
+  approvals?: ApprovalQueue;
+  line?: LineChannel;
 };
 
 type ClientMessage = Record<string, unknown> & { type?: unknown };
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,120}$/;
 
+const MAX_WEBHOOK_BYTES = 1_000_000;
+
+async function readBody(req: import("node:http").IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+    size += buffer.length;
+    if (size > MAX_WEBHOOK_BYTES) throw new Error("request body too large");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
 export function createGateway(options: GatewayOptions) {
-  const { config, harness, log } = options;
+  const { config, harness, log, approvals, line } = options;
   const agents = options.agents ?? new AgentRegistry(config.dataDir);
 
   const clients = new Set<WebSocket>();
@@ -114,9 +132,24 @@ export function createGateway(options: GatewayOptions) {
 
   function channelFor(sessionId: string): SessionChannel {
     if (sessionId.startsWith("telegram:")) return "telegram";
+    if (sessionId.startsWith("line:")) return "line";
     if (sessionId.startsWith("cli:")) return "cli";
     return "board";
   }
+
+  const diagnostics = () => harness.extensions?.diagnostics() ?? [];
+
+  function approvalsState() {
+    return {
+      type: "approvals.state",
+      requests: approvals?.list() ?? [],
+      writes: config.agentExtensionWrites,
+      diagnostics: diagnostics(),
+    };
+  }
+
+  // Every queued request, approval and rejection reaches all open boards.
+  approvals?.onChange(() => broadcast(approvalsState()));
 
   function sessionIdOf(msg: ClientMessage): string | null {
     const sessionId = typeof msg.sessionId === "string" ? msg.sessionId : "";
@@ -178,6 +211,44 @@ export function createGateway(options: GatewayOptions) {
             return;
           }
           await broadcastAgents();
+          return;
+        }
+
+        case "approvals.list":
+          send(socket, approvalsState());
+          return;
+
+        case "approval.approve": {
+          const id = typeof msg.id === "string" ? msg.id : "";
+          const request = approvals?.approve(id) ?? null;
+          if (!request) {
+            send(socket, { type: "approval.result", id, ok: false, message: "ไม่พบคำขอที่รออนุมัติ (อาจหมดอายุแล้ว)" });
+            return;
+          }
+          const extensions = harness.extensions;
+          if (!extensions) {
+            send(socket, { type: "approval.result", id, ok: false, message: "extension system ไม่พร้อมใช้งาน" });
+            return;
+          }
+          try {
+            const message = await extensions.applyApproved(request);
+            send(socket, { type: "approval.result", id, ok: true, message });
+            await broadcastAgents();
+          } catch (error) {
+            send(socket, { type: "approval.result", id, ok: false, message: (error as Error).message });
+          }
+          return;
+        }
+
+        case "approval.reject": {
+          const id = typeof msg.id === "string" ? msg.id : "";
+          const request = approvals?.reject(id) ?? null;
+          send(socket, {
+            type: "approval.result",
+            id,
+            ok: Boolean(request),
+            message: request ? "ปฏิเสธคำขอแล้ว" : "ไม่พบคำขอที่รออนุมัติ",
+          });
           return;
         }
 
@@ -306,6 +377,10 @@ export function createGateway(options: GatewayOptions) {
           defaultModel: harness.catalog.defaultRef(),
           models: harness.catalog.list(),
           extensions: harness.extensions?.summary() ?? null,
+          diagnostics: diagnostics(),
+          extensionWrites: config.agentExtensionWrites,
+          approvals: approvals?.list() ?? [],
+          line: line?.status() ?? null,
           agents: state.agents,
           scene: state.scene,
           office: state.office,
@@ -352,6 +427,22 @@ export function createGateway(options: GatewayOptions) {
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
+    if (line && url.pathname === line.webhookPath && req.method === "POST") {
+      void (async () => {
+        try {
+          const raw = await readBody(req);
+          const result = await line.handleWebhook(raw, req.headers["x-line-signature"] as string | undefined);
+          res.writeHead(result.status, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(result.body);
+        } catch (error) {
+          log.warn(`line webhook failed: ${(error as Error).message}`);
+          res.writeHead(400, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify({ ok: false, error: "bad request" }));
+        }
+      })();
+      return;
+    }
+
     if (url.pathname === "/api/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, agent: "clawgate", online: clients.size }));
@@ -374,6 +465,11 @@ export function createGateway(options: GatewayOptions) {
           models: harness.catalog.list(),
           defaultModel: harness.catalog.defaultRef(),
           telegram: config.telegram ? config.telegram.allowedChatIds.length : 0,
+          line: line?.status() ?? null,
+          extensionWrites: config.agentExtensionWrites,
+          extensions: harness.extensions?.summary() ?? null,
+          diagnostics: diagnostics(),
+          approvals: approvals?.list().length ?? 0,
         }),
       );
       return;

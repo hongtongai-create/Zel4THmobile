@@ -190,6 +190,9 @@ export class AgentHarness {
     const definitions = tools
       .definitions()
       .filter((definition) => !blockedTools.has(definition.function.name));
+    const allowedTools = agent
+      ? new Set(tools.names().filter((name) => !blockedTools.has(name)))
+      : undefined;
 
     try {
       for (let step = 0; step < config.maxIterations; step += 1) {
@@ -230,6 +233,8 @@ export class AgentHarness {
           const outcome = await tools.invoke(call.function.name, call.function.arguments, {
             sessionId,
             log,
+            agentId: agent?.id ?? null,
+            allowedTools,
           });
 
           emit({

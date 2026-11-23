@@ -45,6 +45,19 @@ export type LoadedPlugin = {
   dir: string;
 };
 
+/**
+ * One read-only load report line: what was discovered and why it is (not) live.
+ * Reasons never contain secrets; they come from the loader itself.
+ */
+export type ExtensionDiagnostic = {
+  kind: ExtensionKind;
+  name: string;
+  status: "loaded" | "skipped" | "failed";
+  reason: string;
+  tools: string[];
+  entry: string | null;
+};
+
 export type InstalledEntry = {
   name: string;
   kind: ExtensionKind;
