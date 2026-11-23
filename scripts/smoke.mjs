@@ -16,6 +16,7 @@ import { WebSocket } from "ws";
 let modelCalls = 0;
 let graphCalls = 0;
 const graphBodies = [];
+const modelRequests = [];
 
 const stub = createServer((req, res) => {
   let body = "";
@@ -26,6 +27,7 @@ const stub = createServer((req, res) => {
     if (req.url === "/v1/chat/completions") {
       modelCalls += 1;
       const payload = JSON.parse(body);
+      modelRequests.push(payload);
       assert.equal(payload.tool_choice, "auto", "tools should be offered to the model");
       assert.ok(
         payload.tools.some((tool) => tool.function.name === "facebook_post"),
@@ -302,6 +304,75 @@ async function main() {
     assert.equal(entry.totalTokens, 39);
     assert.ok(Math.abs(entry.costUsd - 0.000048) < 1e-12, `unexpected logged cost ${entry.costUsd}`);
     check("usage ledger: per-turn tokens + cost persisted and rolled up per provider");
+
+    // 12. Agents: create, configure, move, chat with a character, delete
+    assert.ok(Array.isArray(ready.agents) && ready.agents.length === 1, "gateway seeds one default agent");
+    assert.equal(ready.agents[0].id, "main");
+    assert.equal(ready.office.scenes.length, 3, "scenes come from board/assets/office.json");
+    assert.equal(ready.office.characters.length, 3);
+    check("ready frame carries agents and office assets");
+
+    socket.send(
+      JSON.stringify({
+        type: "agent.create",
+        name: "Nova",
+        emoji: "✦",
+        role: "writer",
+        identity: "You write one-line posts.",
+      }),
+    );
+    const created = await inbox.next(
+      (frame) => frame.type === "agents.state" && frame.agents.some((agent) => agent.name === "Nova"),
+      "agents.state after create",
+    );
+    const nova = created.agents.find((agent) => agent.name === "Nova");
+    assert.equal(nova.role, "writer");
+    assert.equal(nova.identity, "You write one-line posts.");
+    check("agent.create broadcasts a new profile");
+
+    socket.send(JSON.stringify({ type: "agent.update", id: nova.id, x: 12, y: 40, model: "custom:smoke-model" }));
+    const moved = await inbox.next(
+      (frame) => frame.type === "agents.state" && frame.agents.find((agent) => agent.id === nova.id)?.x === 12,
+      "agents.state after update",
+    );
+    assert.equal(moved.agents.find((agent) => agent.id === nova.id).model, "custom:smoke-model");
+    check("agent.update stores position and model");
+
+    socket.send(JSON.stringify({ type: "office.scene", scene: "night" }));
+    await inbox.next((frame) => frame.type === "agents.state" && frame.scene === "night", "scene broadcast");
+    check("office.scene is shared with every board client");
+
+    socket.send(
+      JSON.stringify({
+        type: "chat.send",
+        sessionId: `board:agent:${nova.id}`,
+        agentId: nova.id,
+        text: "hello nova",
+      }),
+    );
+    await inbox.next(
+      (frame) =>
+        frame.type === "event" &&
+        frame.event.type === "turn.end" &&
+        frame.event.sessionId === `board:agent:${nova.id}`,
+      "turn.end for the character",
+    );
+    const novaSystem = modelRequests.at(-1).messages[0].content;
+    assert.match(novaSystem, /Nova/);
+    assert.match(novaSystem, /writer/);
+    assert.match(novaSystem, /You write one-line posts\./);
+    check("chatting with a character uses its identity, role and model");
+
+    socket.send(JSON.stringify({ type: "agent.delete", id: nova.id }));
+    const afterDelete = await inbox.next(
+      (frame) => frame.type === "agents.state" && !frame.agents.some((agent) => agent.id === nova.id),
+      "agents.state after delete",
+    );
+    assert.equal(afterDelete.agents.length, 1);
+    const stored = JSON.parse(await readFile(path.join(dataDir, "agents.json"), "utf8"));
+    assert.equal(stored.agents.length, 1, "agents.json is persisted");
+    assert.equal(stored.scene, "night");
+    check("agent.delete and agents.json persistence");
 
     socket.close();
   } finally {

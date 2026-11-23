@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Nova">
+  <defs>
+    <linearGradient id="n-head" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c4b5fd" />
+      <stop offset="1" stop-color="#7c6cf6" />
+    </linearGradient>
+    <linearGradient id="n-visor" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd7a1" />
+      <stop offset="1" stop-color="#fb7185" />
+    </linearGradient>
+  </defs>
+  <ellipse cx="60" cy="112" rx="26" ry="5" fill="#000" opacity=".28" />
+  <path d="M34 60h52l-4 48H38z" fill="#2a2440" stroke="#443a6b" stroke-width="2" />
+  <rect x="48" y="74" width="24" height="20" rx="6" fill="url(#n-visor)" opacity=".22" />
+  <circle cx="60" cy="40" r="26" fill="url(#n-head)" />
+  <rect x="38" y="32" width="44" height="17" rx="8.5" fill="#160f2b" />
+  <rect x="44" y="36" width="32" height="9" rx="4.5" fill="url(#n-visor)" />
+  <path d="M44 20l8-8M76 20l-8-8" stroke="#ffd7a1" stroke-width="2.6" stroke-linecap="round" opacity=".8" />
+  <rect x="22" y="66" width="12" height="26" rx="6" fill="#3a3163" />
+  <rect x="86" y="66" width="12" height="26" rx="6" fill="#3a3163" />
+  <path d="M50 90h20" stroke="#ffd7a1" stroke-width="3" stroke-linecap="round" opacity=".65" />
+  <circle cx="60" cy="102" r="4" fill="#ffd7a1" opacity=".5" />
+</svg>

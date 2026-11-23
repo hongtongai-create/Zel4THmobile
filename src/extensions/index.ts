@@ -67,17 +67,51 @@ export class ExtensionManager {
     };
   }
 
+  /** Tool names this manager registered (plugins + MCP), so a caller can hide some. */
+  ownedToolNames(): Set<string> {
+    return new Set(this.owned);
+  }
+
+  /**
+   * Extension tools an agent profile may not use. An empty set means "no
+   * filtering": the profile allows everything it has installed.
+   */
+  blockedTools(selection: { plugins: string[] | null; mcp: string[] | null }): Set<string> {
+    const blocked = new Set<string>();
+    if (selection.plugins === null && selection.mcp === null) return blocked;
+
+    const allowed = new Set<string>();
+    for (const plugin of this.plugins) {
+      if (selection.plugins === null || selection.plugins.includes(plugin.name)) {
+        for (const tool of plugin.tools) allowed.add(tool.name);
+      }
+    }
+    for (const runtime of this.mcp) {
+      if (selection.mcp === null || selection.mcp.includes(runtime.name)) {
+        for (const tool of runtime.tools) allowed.add(tool.name);
+      }
+    }
+    for (const name of this.owned) if (!allowed.has(name)) blocked.add(name);
+    return blocked;
+  }
+
   /** Skill bodies and plugin prompts, rendered into the system prompt. */
-  promptSections(): string[] {
+  promptSections(selection?: { skills: string[] | null; plugins: string[] | null } | null): string[] {
     const sections: string[] = [];
-    if (this.skills.length > 0) {
+    const skills =
+      selection && selection.skills !== null
+        ? this.skills.filter((skill) => selection.skills!.includes(skill.name))
+        : this.skills;
+    if (skills.length > 0) {
       sections.push(
         "Skills (instructions you have installed; follow them when relevant):",
-        ...this.skills.map((skill) => `## Skill: ${skill.name}\n${skill.body}`),
+        ...skills.map((skill) => `## Skill: ${skill.name}\n${skill.body}`),
       );
     }
     for (const plugin of this.plugins) {
-      if (plugin.prompt) sections.push(`## Plugin: ${plugin.name}\n${plugin.prompt}`);
+      if (!plugin.prompt) continue;
+      if (selection && selection.plugins !== null && !selection.plugins.includes(plugin.name)) continue;
+      sections.push(`## Plugin: ${plugin.name}\n${plugin.prompt}`);
     }
     return sections;
   }

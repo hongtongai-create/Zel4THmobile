@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="th">
   <head>
     <meta charset="utf-8" />
     <meta
@@ -18,11 +18,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body data-view="office">
     <div class="app">
       <div class="scrim" id="scrim"></div>
 
-      <aside class="drawer" id="drawer" aria-label="Sessions and settings">
+      <aside class="drawer" id="drawer" aria-label="Sessions, agents and settings">
         <div class="drawer-head">
           <div class="brand">
             <span class="mark">◆</span>
@@ -39,7 +39,10 @@
           <span id="status-text">connecting…</span>
         </div>
 
-        <button class="primary wide" id="new-chat" type="button">New chat</button>
+        <button class="primary wide" id="new-agent" type="button">＋ สร้าง Agent</button>
+
+        <div class="section-title">Agents</div>
+        <ul class="sessions agents" id="agent-list"></ul>
 
         <div class="section-title">Sessions</div>
         <ul class="sessions" id="session-list"></ul>
@@ -56,43 +59,58 @@
         <header class="appbar">
           <button class="icon-btn" id="menu" type="button" aria-label="Open menu">☰</button>
           <div class="title">
-            <h1 id="session-title">New conversation</h1>
-            <p id="session-meta">no messages yet</p>
+            <h1 id="view-title">ออฟฟิศ</h1>
+            <p id="view-meta">connecting…</p>
           </div>
+          <button class="view-toggle" id="view-toggle" type="button">แชท</button>
           <button class="model-chip" id="model-btn" type="button" aria-label="Change model">
             <span id="model-chip-text">model</span>
           </button>
         </header>
 
-        <div class="messages" id="messages">
-          <div class="empty" id="empty">
-            <p class="empty-title">Connected to the gateway</p>
-            <p class="muted">
-              Ask the agent to do something and tool calls appear here live.
-            </p>
+        <section class="office" id="office-view" aria-label="AI office">
+          <div class="stage" id="stage">
+            <div class="scene-layer" id="scene-layer"></div>
+            <div class="stage-empty" id="stage-empty" hidden>
+              <p>ยังไม่มี agent</p>
+              <p class="muted">กด ＋ Agent เพื่อสร้างตัวแรก</p>
+            </div>
           </div>
-        </div>
+          <div class="office-bar">
+            <div class="scenes" id="scene-picker"></div>
+            <button class="primary add-agent" id="add-agent" type="button" aria-label="Create agent">＋</button>
+          </div>
+        </section>
 
-        <form class="composer" id="composer">
-          <textarea
-            id="input"
-            rows="1"
-            enterkeyhint="send"
-            placeholder="Message the agent…"
-            aria-label="Message"
-          ></textarea>
-          <button class="send" type="submit" id="send" aria-label="Send">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path
-                d="M4 12l16-8-6 8 6 8-16-8z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-        </form>
+        <section class="chat" id="chat-view" aria-label="Chat">
+          <div class="messages" id="messages">
+            <div class="empty" id="empty">
+              <p class="empty-title">Connected to the gateway</p>
+              <p class="muted">Ask the agent to do something and tool calls appear here live.</p>
+            </div>
+          </div>
+
+          <form class="composer" id="composer">
+            <textarea
+              id="input"
+              rows="1"
+              enterkeyhint="send"
+              placeholder="Message the agent…"
+              aria-label="Message"
+            ></textarea>
+            <button class="send" type="submit" id="send" aria-label="Send">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path
+                  d="M4 12l16-8-6 8 6 8-16-8z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </form>
+        </section>
       </main>
     </div>
 
@@ -103,6 +121,25 @@
       </div>
       <div class="sheet-body" id="model-options"></div>
     </div>
+
+    <div class="sheet agent-sheet" id="agent-sheet" aria-label="Agent settings" aria-hidden="true">
+      <div class="sheet-head">
+        <span id="agent-sheet-title">ตั้งค่า agent</span>
+        <button class="icon-btn" id="agent-sheet-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div id="agent-form"></div>
+        <div class="sheet-actions">
+          <button class="primary" id="agent-save" type="button">บันทึก</button>
+          <button class="ghost" id="agent-chat" type="button">เปิดแชท</button>
+          <button class="ghost" id="agent-reset" type="button">ล้างประวัติ</button>
+          <button class="ghost danger" id="agent-delete" type="button">ลบ agent</button>
+        </div>
+        <p class="error" id="agent-error"></p>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <div class="overlay" id="login">
       <form class="card" id="login-form">

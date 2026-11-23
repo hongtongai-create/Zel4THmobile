@@ -18,18 +18,38 @@ const els = {
   modelSheet: document.getElementById("model-sheet"),
   modelOptions: document.getElementById("model-options"),
   sheetClose: document.getElementById("sheet-close"),
-  sessionList: document.getElementById("session-list"),
-  newChat: document.getElementById("new-chat"),
   statusDot: document.getElementById("status-dot"),
   statusText: document.getElementById("status-text"),
-  sessionTitle: document.getElementById("session-title"),
-  sessionMeta: document.getElementById("session-meta"),
+  agentList: document.getElementById("agent-list"),
+  sessionList: document.getElementById("session-list"),
+  newAgent: document.getElementById("new-agent"),
+  addAgent: document.getElementById("add-agent"),
+  viewToggle: document.getElementById("view-toggle"),
+  viewTitle: document.getElementById("view-title"),
+  viewMeta: document.getElementById("view-meta"),
+  chatView: document.getElementById("chat-view"),
+  stage: document.getElementById("stage"),
+  sceneLayer: document.getElementById("scene-layer"),
+  scenePicker: document.getElementById("scene-picker"),
+  stageEmpty: document.getElementById("stage-empty"),
+  agentSheet: document.getElementById("agent-sheet"),
+  agentSheetTitle: document.getElementById("agent-sheet-title"),
+  agentSheetClose: document.getElementById("agent-sheet-close"),
+  agentForm: document.getElementById("agent-form"),
+  agentSave: document.getElementById("agent-save"),
+  agentChat: document.getElementById("agent-chat"),
+  agentReset: document.getElementById("agent-reset"),
+  agentDelete: document.getElementById("agent-delete"),
+  agentError: document.getElementById("agent-error"),
   toolList: document.getElementById("tool-list"),
+  toast: document.getElementById("toast"),
 };
 
 const SESSION_KEY = "clawgate.session";
 const TOKEN_KEY = "clawgate.token";
 const MODEL_KEY = "clawgate.model";
+const AGENT_PREFIX = "board:agent:";
+const ACTOR_SIZE = 78;
 
 const state = {
   ws: null,
@@ -37,7 +57,19 @@ const state = {
   sessionId: null,
   models: [],
   currentModel: null,
+  defaultModel: null,
   tools: [],
+  extensions: { skills: [], plugins: [], mcp: [] },
+  agents: [],
+  scene: null,
+  office: { scenes: [], characters: [] },
+  view: "office",
+  agentId: null,
+  sheetAgentId: null,
+  creating: false,
+  chatTitle: "แชท",
+  chatMeta: "no messages yet",
+  activity: new Map(),
   reconnectTimer: null,
   pingTimer: null,
   retries: 0,
@@ -82,10 +114,51 @@ const storage = {
   },
 };
 
+/* ---------- small helpers ---------- */
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function short(text, max) {
+  const value = String(text ?? "").replace(/\s+/g, " ").trim();
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
 function newSessionId() {
   const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}${Math.random().toString(16).slice(2)}`;
   return `board:${id}`;
 }
+
+function agentSessionId(id) {
+  return `${AGENT_PREFIX}${id}`;
+}
+
+function sessionAgentId(sessionId) {
+  if (typeof sessionId !== "string" || !sessionId.startsWith(AGENT_PREFIX)) return null;
+  return sessionId.slice(AGENT_PREFIX.length) || null;
+}
+
+function findAgent(id) {
+  if (!id) return null;
+  return state.agents.find((agent) => agent.id === id) ?? null;
+}
+
+function toast(text) {
+  els.toast.textContent = text;
+  els.toast.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);
+}
+
+/* ---------- status + header ---------- */
 
 function setStatus(kind, text) {
   els.statusDot.className = `dot ${kind}`;
@@ -97,6 +170,42 @@ function setModelChip(model) {
   els.modelChipText.textContent = model || "no model";
   els.modelBtn.disabled = state.models.length === 0;
 }
+
+function setChatHeader(title, meta) {
+  state.chatTitle = title || "แชท";
+  if (meta != null) state.chatMeta = meta;
+  updateViewChrome();
+}
+
+function setChatMeta(meta) {
+  state.chatMeta = meta;
+  updateViewChrome();
+}
+
+function updateViewChrome() {
+  document.body.dataset.view = state.view;
+  els.viewToggle.textContent = state.view === "office" ? "แชท" : "ออฟฟิศ";
+
+  if (state.view === "office") {
+    const scene = (state.office.scenes ?? []).find((entry) => entry.id === state.scene);
+    els.viewTitle.textContent = "ออฟฟิศ";
+    els.viewMeta.textContent = `${state.agents.length} agent · ${scene?.name ?? "ไม่มีฉาก"}`;
+    return;
+  }
+  els.viewTitle.textContent = state.chatTitle;
+  els.viewMeta.textContent = state.chatMeta;
+}
+
+function setView(view) {
+  state.view = view;
+  updateViewChrome();
+  if (view === "chat") {
+    els.messages.scrollTop = els.messages.scrollHeight;
+    els.viewToggle.blur();
+  }
+}
+
+/* ---------- chat messages ---------- */
 
 function hideEmpty() {
   if (els.empty) {
@@ -117,9 +226,7 @@ els.messages.addEventListener("scroll", () => {
 
 function addBubble(role, text) {
   hideEmpty();
-  const div = document.createElement("div");
-  div.className = `msg ${role}`;
-  div.textContent = text;
+  const div = el("div", `msg ${role}`, text);
   els.messages.append(div);
   scrollToBottom(role === "user");
   return div;
@@ -127,25 +234,16 @@ function addBubble(role, text) {
 
 function addToolChip(callId, name, args, phase) {
   hideEmpty();
-  const chip = document.createElement("div");
-  chip.className = "tool";
+  const chip = el("div", "tool");
   chip.dataset.callId = callId;
 
-  const head = document.createElement("div");
-  head.className = "head";
-  const icon = document.createElement("span");
-  icon.textContent = phase === "running" ? "⋯" : "✓";
-  const label = document.createElement("span");
-  label.className = "name";
-  label.textContent = name;
-  const status = document.createElement("span");
-  status.textContent = phase === "running" ? "running" : "done";
+  const head = el("div", "head");
+  const icon = el("span", null, phase === "running" ? "⋯" : "✓");
+  const label = el("span", "name", name);
+  const status = el("span", null, phase === "running" ? "running" : "done");
   head.append(icon, label, status);
 
-  const payload = document.createElement("div");
-  payload.className = "payload";
-  payload.textContent = typeof args === "string" ? args : JSON.stringify(args);
-
+  const payload = el("div", "payload", typeof args === "string" ? args : JSON.stringify(args));
   chip.append(head, payload);
   els.messages.append(chip);
   state.toolChips.set(callId, { chip, icon, status, payload });
@@ -166,9 +264,7 @@ function finishToolChip(event) {
 function showTyping() {
   if (state.typing) return;
   hideEmpty();
-  const div = document.createElement("div");
-  div.className = "typing";
-  div.textContent = "agent is working";
+  const div = el("div", "typing", "agent is working");
   els.messages.append(div);
   state.typing = div;
   scrollToBottom(true);
@@ -187,13 +283,11 @@ function setBusy(busy) {
 
 function updateMeta(session) {
   const count = (session?.messages ?? []).length;
-  els.sessionMeta.textContent = count
-    ? `${count} messages · ${session.model ?? state.currentModel ?? ""}`
-    : "no messages yet";
-  if (session?.title) els.sessionTitle.textContent = session.title;
+  const model = session?.model ?? state.currentModel ?? "";
+  setChatMeta(count ? `${count} ข้อความ · ${model}` : "ยังไม่มีข้อความ");
 }
 
-/* ---------- drawer / sheet ---------- */
+/* ---------- drawer / sheets ---------- */
 
 function openDrawer() {
   els.drawer.classList.add("open");
@@ -207,7 +301,7 @@ function closeDrawer() {
 
 function openModelSheet() {
   if (state.models.length === 0) {
-    addBubble("error", "No models configured on the gateway yet.");
+    toast("ยังไม่มีโมเดลใน gateway");
     return;
   }
   renderModelOptions();
@@ -221,41 +315,387 @@ function closeModelSheet() {
   els.modelSheet.setAttribute("aria-hidden", "true");
 }
 
-/* ---------- rendering ---------- */
+function closeAgentSheet() {
+  els.agentSheet.classList.remove("open");
+  els.agentSheet.setAttribute("aria-hidden", "true");
+  state.sheetAgentId = null;
+  state.creating = false;
+}
+
+/* ---------- office ---------- */
+
+function renderOffice() {
+  els.stage.querySelectorAll(".actor").forEach((node) => node.remove());
+
+  const scenes = state.office.scenes ?? [];
+  const scene = scenes.find((entry) => entry.id === state.scene) ?? scenes[0] ?? null;
+  els.sceneLayer.style.backgroundImage = scene ? `url("${scene.image}")` : "none";
+  els.stage.classList.toggle("no-scene", !scene);
+
+  for (const agent of state.agents) els.stage.append(buildActor(agent));
+
+  els.stageEmpty.hidden = state.agents.length > 0;
+  renderScenePicker();
+  renderAgentList();
+  paintAllActivity();
+  updateViewChrome();
+}
+
+function actorEl(id) {
+  return [...els.stage.querySelectorAll(".actor")].find((node) => node.dataset.id === id) ?? null;
+}
+
+function buildActor(agent) {
+  const actor = el("div", "actor");
+  actor.dataset.id = agent.id;
+  actor.setAttribute("role", "button");
+  actor.setAttribute("tabindex", "0");
+  actor.setAttribute("aria-label", `${agent.name} ตั้งค่า`);
+  actor.style.left = `${agent.x}%`;
+  actor.style.top = `${agent.y}%`;
+  actor.style.setProperty("--actor-color", agent.color || "#6ee7b7");
+  if (agent.id === state.agentId) actor.classList.add("focused");
+
+  const bubble = el("div", "actor-bubble");
+  const avatar = el("div", "actor-avatar");
+
+  const asset = (state.office.characters ?? []).find(
+    (entry) => entry.id === agent.sprite || entry.image === agent.sprite,
+  );
+  const image = asset?.image ?? (agent.sprite && agent.sprite.startsWith("/") ? agent.sprite : null);
+  if (image) {
+    const sprite = el("div", "actor-sprite");
+    sprite.style.backgroundImage = `url("${image}")`;
+    const frames = Math.max(1, asset?.frames ?? 1);
+    if (frames > 1) {
+      sprite.style.backgroundSize = `${ACTOR_SIZE * frames}px ${ACTOR_SIZE}px`;
+      if (typeof sprite.animate === "function") {
+        sprite.animate(
+          [{ backgroundPositionX: "0px" }, { backgroundPositionX: `${-ACTOR_SIZE * frames}px` }],
+          {
+            duration: ((asset?.fps || 6) > 0 ? 1000 / (asset?.fps || 6) : 160) * frames,
+            iterations: Infinity,
+            easing: `steps(${frames}, end)`,
+          },
+        );
+      }
+    }
+    avatar.append(sprite);
+  } else {
+    avatar.classList.add("emoji");
+    avatar.textContent = agent.emoji || "🤖";
+  }
+
+  actor.append(bubble, avatar, el("div", "actor-name", agent.name));
+
+  let drag = null;
+  actor.addEventListener("pointerdown", (event) => {
+    if (event.button != null && event.button !== 0) return;
+    drag = { x: event.clientX, y: event.clientY, moved: false };
+    actor.classList.add("dragging");
+    if (actor.setPointerCapture) actor.setPointerCapture(event.pointerId);
+  });
+
+  actor.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    if (!drag.moved && Math.abs(event.clientX - drag.x) < 8 && Math.abs(event.clientY - drag.y) < 8) {
+      return;
+    }
+    drag.moved = true;
+    const rect = els.stage.getBoundingClientRect();
+    const x = clamp(((event.clientX - rect.left) / rect.width) * 100, 2, 96);
+    const y = clamp(((event.clientY - rect.top) / rect.height) * 100, 8, 94);
+    actor.style.left = `${x}%`;
+    actor.style.top = `${y}%`;
+    actor.dataset.x = String(x);
+    actor.dataset.y = String(y);
+  });
+
+  const finishDrag = () => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    actor.classList.remove("dragging");
+    if (!moved) {
+      openAgentSheet(agent.id);
+      return;
+    }
+    const x = Number(actor.dataset.x ?? agent.x);
+    const y = Number(actor.dataset.y ?? agent.y);
+    agent.x = x;
+    agent.y = y;
+    send({ type: "office.move", id: agent.id, x, y });
+  };
+  actor.addEventListener("pointerup", finishDrag);
+  actor.addEventListener("pointercancel", () => {
+    drag = null;
+    actor.classList.remove("dragging");
+  });
+  actor.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openAgentSheet(agent.id);
+    }
+  });
+
+  return actor;
+}
+
+function renderScenePicker() {
+  els.scenePicker.innerHTML = "";
+  for (const scene of state.office.scenes ?? []) {
+    const chip = el("button", "chip", scene.name);
+    chip.type = "button";
+    if (scene.id === (state.scene ?? state.office.scenes[0]?.id)) chip.classList.add("active");
+    chip.addEventListener("click", () => {
+      state.scene = scene.id;
+      renderOffice();
+      send({ type: "office.scene", scene: scene.id });
+    });
+    els.scenePicker.append(chip);
+  }
+}
+
+function renderAgentList() {
+  els.agentList.innerHTML = "";
+  if (state.agents.length === 0) {
+    els.agentList.append(el("li", "muted", "ยังไม่มี agent"));
+    return;
+  }
+  for (const agent of state.agents) {
+    const li = el("li");
+    if (agent.id === state.agentId) li.classList.add("active");
+    const top = el("div", "agent-row");
+    top.append(el("span", "agent-emoji", agent.emoji || "🤖"), el("span", null, agent.name));
+    const meta = el("span", "meta", [agent.role, agent.model].filter(Boolean).join(" · ") || "โมเดลเริ่มต้น");
+    li.append(top, meta);
+    li.addEventListener("click", () => {
+      closeDrawer();
+      setView("chat");
+      openSession(agentSessionId(agent.id), agent.model ?? undefined);
+    });
+    els.agentList.append(li);
+  }
+}
+
+/* ---------- activity bubbles ---------- */
+
+function setActivity(agentId, patch) {
+  if (!agentId) return;
+  const current = state.activity.get(agentId) ?? { busy: false, text: "" };
+  state.activity.set(agentId, { ...current, ...patch });
+  paintActivity(agentId);
+}
+
+function paintActivity(agentId) {
+  const actor = actorEl(agentId);
+  if (!actor) return;
+  const activity = state.activity.get(agentId) ?? { busy: false, text: "" };
+  actor.classList.toggle("working", Boolean(activity.busy));
+  const bubble = actor.querySelector(".actor-bubble");
+  if (!bubble) return;
+  bubble.textContent = activity.text ?? "";
+  bubble.classList.toggle("show", Boolean(activity.text));
+}
+
+function paintAllActivity() {
+  for (const agent of state.agents) paintActivity(agent.id);
+}
+
+/* ---------- agent sheet ---------- */
+
+function formField(labelText, control) {
+  const wrap = el("label", "field");
+  wrap.append(el("span", null, labelText), control);
+  return wrap;
+}
+
+function textInput(name, value, options = {}) {
+  const input = document.createElement("input");
+  input.type = options.type ?? "text";
+  input.name = name;
+  input.value = value ?? "";
+  if (options.placeholder) input.placeholder = options.placeholder;
+  if (options.maxLength) input.maxLength = options.maxLength;
+  return input;
+}
+
+function textArea(name, value, placeholder) {
+  const area = document.createElement("textarea");
+  area.name = name;
+  area.value = value ?? "";
+  area.rows = 6;
+  if (placeholder) area.placeholder = placeholder;
+  return area;
+}
+
+function selectInput(name, value, options) {
+  const select = document.createElement("select");
+  select.name = name;
+  for (const option of options) {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = option.label;
+    select.append(node);
+  }
+  select.value = value ?? "";
+  return select;
+}
+
+function checklist(name, items, selected) {
+  const wrap = el("div", "checklist");
+  if (!items || items.length === 0) {
+    wrap.append(el("span", "muted", "ยังไม่มีของติดตั้ง"));
+    return wrap;
+  }
+  for (const item of items) {
+    const label = el("label", "check");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.name = name;
+    box.value = item;
+    box.checked = selected == null ? true : selected.includes(item);
+    label.append(box, el("span", null, item));
+    wrap.append(label);
+  }
+  return wrap;
+}
+
+function openAgentSheet(id) {
+  const agent = id ? findAgent(id) : null;
+  state.sheetAgentId = agent?.id ?? null;
+  state.creating = !agent;
+
+  els.agentSheetTitle.textContent = agent ? `ตั้งค่า · ${agent.name}` : "สร้าง Agent ใหม่";
+  els.agentError.textContent = "";
+  renderAgentForm(agent);
+  els.agentChat.hidden = !agent;
+  els.agentReset.hidden = !agent;
+  els.agentDelete.hidden = !agent;
+
+  els.agentSheet.classList.add("open");
+  els.agentSheet.setAttribute("aria-hidden", "false");
+  closeDrawer();
+}
+
+function renderAgentForm(agent) {
+  els.agentForm.innerHTML = "";
+  const form = el("div", "form");
+
+  const nameRow = el("div", "row");
+  nameRow.append(formField("ชื่อ", textInput("agent-name", agent?.name ?? "", { placeholder: "เช่น Nova", maxLength: 40 })));
+  const emojiWrap = formField("อีโมจิ", textInput("agent-emoji", agent?.emoji ?? "🤖", { maxLength: 4 }));
+  emojiWrap.classList.add("narrow");
+  nameRow.append(emojiWrap);
+  form.append(nameRow);
+
+  form.append(
+    formField("บทบาท", textInput("agent-role", agent?.role ?? "", { placeholder: "เช่น นักเขียนคอนเทนต์" })),
+  );
+
+  const modelOptions = [
+    { value: "", label: "ตามค่าเริ่มต้นของระบบ" },
+    ...state.models.map((model) => ({ value: model.ref, label: model.ref })),
+  ];
+  form.append(formField("โมเดล", selectInput("agent-model", agent?.model ?? "", modelOptions)));
+
+  const styleRow = el("div", "row");
+  const colorWrap = formField("สี", textInput("agent-color", agent?.color ?? "#6ee7b7", { type: "color" }));
+  colorWrap.classList.add("narrow");
+  const characterOptions = [
+    { value: "", label: "อีโมจิ" },
+    ...(state.office.characters ?? []).map((entry) => ({ value: entry.id, label: entry.name })),
+  ];
+  styleRow.append(colorWrap, formField("ตัวละคร", selectInput("agent-sprite", agent?.sprite ?? "", characterOptions)));
+  form.append(styleRow);
+
+  form.append(
+    formField(
+      "ตัวตน / บุคลิก (identity)",
+      textArea("agent-identity", agent?.identity ?? "", "เขียนบุคลิก วิธีพูด และสิ่งที่ห้ามทำ"),
+    ),
+  );
+
+  form.append(formField("Skills", checklist("agent-skill", state.extensions.skills ?? [], agent ? agent.skills : null)));
+  form.append(
+    formField("Plugins", checklist("agent-plugin", state.extensions.plugins ?? [], agent ? agent.plugins : null)),
+  );
+  form.append(formField("MCP", checklist("agent-mcp", state.extensions.mcp ?? [], agent ? agent.mcp : null)));
+
+  els.agentForm.append(form);
+}
+
+function readAgentForm() {
+  const val = (name) => els.agentForm.querySelector(`[name="${name}"]`)?.value ?? "";
+  const checked = (name) =>
+    [...els.agentForm.querySelectorAll(`input[name="${name}"]:checked`)].map((node) => node.value);
+
+  const payload = {
+    name: val("agent-name").trim(),
+    emoji: val("agent-emoji").trim(),
+    role: val("agent-role").trim(),
+    model: val("agent-model") || null,
+    color: val("agent-color") || null,
+    sprite: val("agent-sprite") || null,
+    identity: val("agent-identity"),
+  };
+  // Only send a selection when the extension kind exists, so a later install is not silently disabled.
+  if ((state.extensions.skills ?? []).length > 0) payload.skills = checked("agent-skill");
+  if ((state.extensions.plugins ?? []).length > 0) payload.plugins = checked("agent-plugin");
+  if ((state.extensions.mcp ?? []).length > 0) payload.mcp = checked("agent-mcp");
+  return payload;
+}
+
+function saveAgent() {
+  const payload = readAgentForm();
+  if (!payload.name) {
+    els.agentError.textContent = "ใส่ชื่อ agent ก่อน";
+    return;
+  }
+  if (state.creating) {
+    send({ type: "agent.create", ...payload });
+    toast("สร้าง agent แล้ว");
+  } else {
+    send({ type: "agent.update", id: state.sheetAgentId, ...payload });
+    toast("บันทึกแล้ว");
+  }
+  closeAgentSheet();
+}
+
+/* ---------- models / sessions ---------- */
 
 function renderModels(models, defaultRef) {
   state.models = models;
+  state.defaultModel = defaultRef ?? state.defaultModel;
   if (!state.currentModel) setModelChip(defaultRef);
   els.modelBtn.disabled = models.length === 0;
   if (els.modelSheet.classList.contains("open")) renderModelOptions();
 }
 
 function renderModelOptions() {
-  const defaultRef = state.models.find((model) => model.default)?.ref ?? null;
+  const defaultRef = state.models.find((model) => model.default)?.ref ?? state.defaultModel;
   const current = state.currentModel;
   els.modelOptions.innerHTML = "";
   for (const model of state.models) {
-    const button = document.createElement("button");
+    const button = el("button", "model-option");
     button.type = "button";
-    button.className = "model-option";
     if (model.ref === current) button.classList.add("selected");
 
-    const info = document.createElement("div");
-    const ref = document.createElement("div");
-    ref.className = "ref";
-    ref.textContent = model.ref;
-    const sub = document.createElement("div");
-    sub.className = "sub";
-    sub.textContent = `${model.providerLabel}${model.ref === defaultRef ? " · default" : ""}`;
-    info.append(ref, sub);
+    const info = el("div");
+    info.append(el("div", "ref", model.ref));
+    info.append(el("div", "sub", `${model.providerLabel}${model.ref === defaultRef ? " · default" : ""}`));
 
-    const check = document.createElement("span");
-    check.className = "check";
-    check.textContent = model.ref === current ? "✓" : "";
-
+    const check = el("span", "check", model.ref === current ? "✓" : "");
     button.append(info, check);
     button.addEventListener("click", () => {
-      if (state.sessionId) send({ type: "model.set", sessionId: state.sessionId, model: model.ref });
+      if (state.sessionId) {
+        send({
+          type: "model.set",
+          sessionId: state.sessionId,
+          model: model.ref,
+          agentId: state.agentId ?? undefined,
+        });
+      }
       setModelChip(model.ref);
       storage.set(MODEL_KEY, model.ref);
       closeModelSheet();
@@ -270,18 +710,18 @@ function renderSessions(sessions) {
   const others = sessions.filter((session) => !session.id.startsWith("board:"));
 
   for (const session of [...mine, ...others]) {
-    const li = document.createElement("li");
+    const li = el("li");
     if (session.id === state.sessionId) li.classList.add("active");
 
-    const title = document.createElement("span");
-    title.textContent = session.title || session.id.replace(/^board:/, "").slice(0, 12);
-
-    const meta = document.createElement("span");
-    meta.className = "meta";
-    meta.textContent = `${session.channel} · ${session.model} · ${session.messages} msg`;
-
-    li.append(title, meta);
+    const agent = findAgent(sessionAgentId(session.id));
+    li.append(
+      el("span", null, agent ? `${agent.emoji || "🤖"} ${agent.name}` : session.title || session.id.replace(/^board:/, "").slice(0, 12)),
+    );
+    li.append(
+      el("span", "meta", `${session.channel} · ${session.model} · ${session.messages} msg`),
+    );
     li.addEventListener("click", () => {
+      setView("chat");
       openSession(session.id, session.model);
       closeDrawer();
     });
@@ -291,15 +731,18 @@ function renderSessions(sessions) {
 
 function openSession(sessionId, model) {
   state.sessionId = sessionId;
+  state.agentId = sessionAgentId(sessionId);
   storage.set(SESSION_KEY, sessionId);
   els.messages.innerHTML = "";
   state.toolChips.clear();
   stopTyping();
   setBusy(false);
   if (model) setModelChip(model);
-  els.sessionTitle.textContent = "Conversation";
-  els.sessionMeta.textContent = "loading…";
+  const agent = findAgent(state.agentId);
+  setChatHeader(agent ? agent.name : "แชท", "loading…");
   send({ type: "session.history", sessionId });
+  renderAgentList();
+  renderOffice();
 }
 
 /* ---------- websocket ---------- */
@@ -362,19 +805,50 @@ function send(frame) {
   state.ws.send(JSON.stringify(frame));
 }
 
+function applyAgentState(frame) {
+  if (Array.isArray(frame.agents)) state.agents = frame.agents;
+  if ("scene" in frame) state.scene = frame.scene ?? null;
+  if (frame.office && Array.isArray(frame.office.scenes)) state.office = frame.office;
+  if (frame.extensions) state.extensions = frame.extensions;
+
+  if (state.scene == null && (state.office.scenes ?? []).length > 0) {
+    state.scene = state.office.scenes[0].id;
+  }
+  if (state.agentId && !findAgent(state.agentId)) state.agentId = null;
+  if (!state.agentId && state.view === "office" && state.agents[0]) state.agentId = state.agents[0].id;
+  if (state.sheetAgentId && !findAgent(state.sheetAgentId) && !state.creating) closeAgentSheet();
+
+  renderOffice();
+}
+
 function handleFrame(frame) {
   switch (frame.type) {
-    case "ready":
+    case "ready": {
       els.login.hidden = true;
       state.tools = frame.tools ?? [];
       els.toolList.textContent = `tools: ${state.tools.join(", ") || "none"}`;
+      if (frame.extensions) state.extensions = frame.extensions;
       renderModels(frame.models ?? [], frame.defaultModel ?? null);
+
+      const profiles = frame.agents ?? [];
       if (!state.sessionId) {
-        state.sessionId = storage.get(SESSION_KEY) || newSessionId();
-        storage.set(SESSION_KEY, state.sessionId);
+        const saved = storage.get(SESSION_KEY);
+        if (saved) state.sessionId = saved;
+        else if (profiles[0]) state.sessionId = agentSessionId(profiles[0].id);
+        else state.sessionId = newSessionId();
+        state.agentId = sessionAgentId(state.sessionId);
       }
+      applyAgentState({ agents: profiles, scene: frame.scene ?? null, office: frame.office ?? null });
+
+      const agent = findAgent(state.agentId);
+      setChatHeader(agent ? agent.name : "แชท", "loading…");
       send({ type: "sessions.list" });
       send({ type: "session.history", sessionId: state.sessionId });
+      break;
+    }
+
+    case "agents.state":
+      applyAgentState(frame);
       break;
 
     case "models.list":
@@ -392,11 +866,9 @@ function handleFrame(frame) {
       const visible = (frame.messages ?? []).filter((message) => typeof message.content === "string");
       for (const message of visible) addBubble(message.role, message.content);
       if (frame.model) setModelChip(frame.model);
+      const agent = findAgent(sessionAgentId(frame.sessionId));
+      setChatHeader(agent ? agent.name : "แชท", null);
       updateMeta({ messages: visible, model: frame.model ?? "" });
-      if (visible.length === 0) {
-        els.sessionTitle.textContent = "New conversation";
-        els.sessionMeta.textContent = "no messages yet";
-      }
       scrollToBottom(true);
       break;
     }
@@ -404,14 +876,13 @@ function handleFrame(frame) {
     case "model.set":
       setModelChip(frame.model);
       storage.set(MODEL_KEY, frame.model);
-      els.sessionMeta.textContent = `model: ${frame.model}`;
+      setChatMeta(`model: ${frame.model}`);
       break;
 
     case "session.reset":
       els.messages.innerHTML = "";
       state.toolChips.clear();
-      els.sessionTitle.textContent = "New conversation";
-      els.sessionMeta.textContent = "no messages yet";
+      setChatMeta("ยังไม่มีข้อความ");
       break;
 
     case "event":
@@ -419,7 +890,11 @@ function handleFrame(frame) {
       break;
 
     case "error":
-      addBubble("error", frame.message ?? "gateway error");
+      if (els.agentSheet.classList.contains("open")) els.agentError.textContent = frame.message ?? "gateway error";
+      else {
+        toast(frame.message ?? "gateway error");
+        if (state.view === "chat") addBubble("error", frame.message ?? "gateway error");
+      }
       setBusy(false);
       break;
 
@@ -429,25 +904,36 @@ function handleFrame(frame) {
 }
 
 function handleAgentEvent(event) {
+  const agentOfSession = sessionAgentId(event.sessionId);
+  const isCurrent = event.sessionId === state.sessionId;
+
   switch (event.type) {
     case "turn.start":
-      setBusy(true);
-      showTyping();
+      if (agentOfSession) setActivity(agentOfSession, { busy: true, text: "กำลังคิด…" });
+      if (isCurrent) {
+        setBusy(true);
+        showTyping();
+      }
       break;
     case "tool.start":
-      addToolChip(event.callId, event.name, event.args, "running");
+      if (agentOfSession) setActivity(agentOfSession, { busy: true, text: `⚙ ${event.name}` });
+      if (isCurrent) addToolChip(event.callId, event.name, event.args, "running");
       break;
     case "tool.result":
-      finishToolChip(event);
+      if (isCurrent) finishToolChip(event);
+      if (agentOfSession) setActivity(agentOfSession, { busy: true, text: `${event.ok ? "✓" : "✗"} ${event.name}` });
       break;
     case "assistant.message":
-      addBubble("assistant", event.text);
+      if (agentOfSession) setActivity(agentOfSession, { busy: true, text: short(event.text, 64) });
+      if (isCurrent) addBubble("assistant", event.text);
       break;
     case "error":
-      addBubble("error", event.message);
+      if (agentOfSession) setActivity(agentOfSession, { busy: false, text: "⚠ ผิดพลาด" });
+      if (isCurrent) addBubble("error", event.message);
       break;
     case "turn.end":
-      setBusy(false);
+      if (agentOfSession) setActivity(agentOfSession, { busy: false, text: "" });
+      if (isCurrent) setBusy(false);
       send({ type: "sessions.list" });
       break;
     default:
@@ -488,7 +974,7 @@ els.composer.addEventListener("submit", (event) => {
     return;
   }
   addBubble("user", text);
-  send({ type: "chat.send", sessionId: state.sessionId, text });
+  send({ type: "chat.send", sessionId: state.sessionId, agentId: state.agentId ?? undefined, text });
   els.input.value = "";
   els.input.style.height = "auto";
   setBusy(true);
@@ -512,25 +998,42 @@ els.drawerClose.addEventListener("click", closeDrawer);
 els.scrim.addEventListener("click", closeDrawer);
 els.modelBtn.addEventListener("click", openModelSheet);
 els.sheetClose.addEventListener("click", closeModelSheet);
+els.agentSheetClose.addEventListener("click", closeAgentSheet);
+els.viewToggle.addEventListener("click", () => setView(state.view === "office" ? "chat" : "office"));
+
+els.newAgent.addEventListener("click", () => openAgentSheet(null));
+els.addAgent.addEventListener("click", () => openAgentSheet(null));
+els.agentSave.addEventListener("click", saveAgent);
+
+els.agentChat.addEventListener("click", () => {
+  const agent = findAgent(state.sheetAgentId);
+  if (!agent) return;
+  closeAgentSheet();
+  setView("chat");
+  openSession(agentSessionId(agent.id), agent.model ?? undefined);
+});
+
+els.agentReset.addEventListener("click", () => {
+  const agent = findAgent(state.sheetAgentId);
+  if (!agent) return;
+  send({ type: "session.reset", sessionId: agentSessionId(agent.id) });
+  toast(`ล้างประวัติของ ${agent.name} แล้ว`);
+});
+
+els.agentDelete.addEventListener("click", () => {
+  const agent = findAgent(state.sheetAgentId);
+  if (!agent) return;
+  if (!window.confirm(`ลบ ${agent.name} ออกจากออฟฟิศ?`)) return;
+  send({ type: "agent.delete", id: agent.id });
+  toast(`ลบ ${agent.name} แล้ว`);
+  closeAgentSheet();
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   closeDrawer();
   closeModelSheet();
-});
-
-els.newChat.addEventListener("click", () => {
-  const sessionId = newSessionId();
-  state.sessionId = sessionId;
-  storage.set(SESSION_KEY, sessionId);
-  els.messages.innerHTML = "";
-  state.toolChips.clear();
-  stopTyping();
-  setBusy(false);
-  els.sessionTitle.textContent = "New conversation";
-  els.sessionMeta.textContent = "no messages yet";
-  closeDrawer();
-  send({ type: "sessions.list" });
-  els.input.focus();
+  closeAgentSheet();
 });
 
 /* ---------- app lifecycle ---------- */
@@ -580,6 +1083,8 @@ if (urlToken) {
   const query = params.toString();
   history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}`);
 }
+
+setView("office");
 
 const savedToken = storage.get(TOKEN_KEY);
 if (savedToken) {

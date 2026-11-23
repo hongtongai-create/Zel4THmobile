@@ -5,8 +5,10 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AgentHarness } from "../agent.js";
+import { AgentRegistry } from "../agents.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
+import { loadOfficeAssets, type OfficeAssets } from "../office.js";
 import type { AgentEvent, SessionChannel } from "../types.js";
 
 const MIME: Record<string, string> = {
@@ -17,7 +19,14 @@ const MIME: Record<string, string> = {
   ".webmanifest": "application/manifest+json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
   ".ico": "image/x-icon",
+  ".mp3": "audio/mpeg",
+  ".ogg": "audio/ogg",
   ".zip": "application/zip",
   ".gz": "application/gzip",
 };
@@ -42,6 +51,7 @@ type GatewayOptions = {
   config: Config;
   harness: AgentHarness;
   log: Logger;
+  agents?: AgentRegistry;
 };
 
 type ClientMessage = Record<string, unknown> & { type?: unknown };
@@ -50,9 +60,22 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,120}$/;
 
 export function createGateway(options: GatewayOptions) {
   const { config, harness, log } = options;
+  const agents = options.agents ?? new AgentRegistry(config.dataDir);
 
   const clients = new Set<WebSocket>();
   const wss = new WebSocketServer({ noServer: true });
+
+  let assetsPromise: Promise<OfficeAssets> | null = null;
+
+  function officeAssets(): Promise<OfficeAssets> {
+    if (!assetsPromise) {
+      assetsPromise = loadOfficeAssets(config.boardDir).catch((error: Error) => {
+        log.warn(`office assets unavailable: ${error.message}`);
+        return { scenes: [], characters: [] };
+      });
+    }
+    return assetsPromise;
+  }
 
   function broadcast(payload: unknown): void {
     const data = JSON.stringify(payload);
@@ -63,6 +86,22 @@ export function createGateway(options: GatewayOptions) {
 
   function send(socket: WebSocket, payload: unknown): void {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
+  }
+
+  /** Full agent + office state, broadcast after any agent or scene change. */
+  async function agentsState() {
+    const [profiles, assets] = await Promise.all([agents.list(), officeAssets()]);
+    return {
+      type: "agents.state",
+      agents: profiles,
+      scene: agents.scene,
+      office: assets,
+      extensions: harness.extensions?.summary() ?? null,
+    };
+  }
+
+  async function broadcastAgents(): Promise<void> {
+    broadcast(await agentsState());
   }
 
   function onAgentEvent(socket: WebSocket | null): (event: AgentEvent) => void {
@@ -77,6 +116,14 @@ export function createGateway(options: GatewayOptions) {
     if (sessionId.startsWith("telegram:")) return "telegram";
     if (sessionId.startsWith("cli:")) return "cli";
     return "board";
+  }
+
+  function sessionIdOf(msg: ClientMessage): string | null {
+    const sessionId = typeof msg.sessionId === "string" ? msg.sessionId : "";
+    if (!SESSION_ID_PATTERN.test(sessionId)) {
+      return null;
+    }
+    return sessionId;
   }
 
   async function handleMessage(socket: WebSocket, raw: string): Promise<void> {
@@ -102,6 +149,55 @@ export function createGateway(options: GatewayOptions) {
           send(socket, { type: "models.list", models: harness.catalog.list(), default: harness.catalog.defaultRef() });
           return;
 
+        case "agents.list":
+          send(socket, await agentsState());
+          return;
+
+        case "agent.create": {
+          await agents.create(msg);
+          await broadcastAgents();
+          return;
+        }
+
+        case "agent.update": {
+          const id = typeof msg.id === "string" ? msg.id : "";
+          const updated = await agents.update(id, msg);
+          if (!updated) {
+            send(socket, { type: "error", message: "ไม่พบ agent นี้" });
+            return;
+          }
+          await broadcastAgents();
+          return;
+        }
+
+        case "agent.delete": {
+          const id = typeof msg.id === "string" ? msg.id : "";
+          const removed = await agents.remove(id);
+          if (!removed) {
+            send(socket, { type: "error", message: "ไม่พบ agent นี้" });
+            return;
+          }
+          await broadcastAgents();
+          return;
+        }
+
+        case "office.scene": {
+          const scene = typeof msg.scene === "string" ? msg.scene : null;
+          await agents.setScene(scene);
+          await broadcastAgents();
+          return;
+        }
+
+        case "office.move": {
+          const id = typeof msg.id === "string" ? msg.id : "";
+          const patch: Record<string, number> = {};
+          if (typeof msg.x === "number") patch.x = msg.x;
+          if (typeof msg.y === "number") patch.y = msg.y;
+          await agents.update(id, patch);
+          await broadcastAgents();
+          return;
+        }
+
         case "sessions.list": {
           const sessions = await harness.store.list();
           send(socket, {
@@ -119,8 +215,8 @@ export function createGateway(options: GatewayOptions) {
         }
 
         case "session.history": {
-          const sessionId = typeof msg.sessionId === "string" ? msg.sessionId : "";
-          if (!SESSION_ID_PATTERN.test(sessionId)) {
+          const sessionId = sessionIdOf(msg);
+          if (!sessionId) {
             send(socket, { type: "error", message: "Invalid sessionId." });
             return;
           }
@@ -137,8 +233,8 @@ export function createGateway(options: GatewayOptions) {
         }
 
         case "session.reset": {
-          const sessionId = typeof msg.sessionId === "string" ? msg.sessionId : "";
-          if (!SESSION_ID_PATTERN.test(sessionId)) {
+          const sessionId = sessionIdOf(msg);
+          if (!sessionId) {
             send(socket, { type: "error", message: "Invalid sessionId." });
             return;
           }
@@ -148,21 +244,25 @@ export function createGateway(options: GatewayOptions) {
         }
 
         case "model.set": {
-          const sessionId = typeof msg.sessionId === "string" ? msg.sessionId : "";
+          const sessionId = sessionIdOf(msg);
           const model = typeof msg.model === "string" ? msg.model : "";
-          if (!SESSION_ID_PATTERN.test(sessionId)) {
+          if (!sessionId) {
             send(socket, { type: "error", message: "Invalid sessionId." });
             return;
           }
           const session = await harness.setModel(sessionId, channelFor(sessionId), model);
+          // A model picked for a character also becomes that agent's default.
+          const agentId = typeof msg.agentId === "string" ? msg.agentId : "";
+          if (agentId) await agents.update(agentId, { model: session.model });
           send(socket, { type: "model.set", sessionId, model: session.model });
+          if (agentId) await broadcastAgents();
           return;
         }
 
         case "chat.send": {
-          const sessionId = typeof msg.sessionId === "string" ? msg.sessionId : "";
+          const sessionId = sessionIdOf(msg);
           const text = typeof msg.text === "string" ? msg.text.trim() : "";
-          if (!SESSION_ID_PATTERN.test(sessionId)) {
+          if (!sessionId) {
             send(socket, { type: "error", message: "Invalid sessionId." });
             return;
           }
@@ -170,9 +270,15 @@ export function createGateway(options: GatewayOptions) {
             send(socket, { type: "error", message: "Message text is empty." });
             return;
           }
+          const agentId = typeof msg.agentId === "string" ? msg.agentId : "";
+          const profile = agentId ? await agents.get(agentId) : null;
+          if (agentId && !profile) {
+            send(socket, { type: "error", message: "ไม่พบ agent นี้" });
+            return;
+          }
           const emit = onAgentEvent(null);
           harness
-            .run(sessionId, channelFor(sessionId), text, emit)
+            .run(sessionId, channelFor(sessionId), text, emit, profile)
             .catch(() => undefined);
           return;
         }
@@ -190,14 +296,24 @@ export function createGateway(options: GatewayOptions) {
     clients.add(socket);
     log.info(`board client connected (${clients.size} online)`);
 
-    send(socket, {
-      type: "ready",
-      agent: "clawgate",
-      tools: harness.tools.names(),
-      defaultModel: harness.catalog.defaultRef(),
-      models: harness.catalog.list(),
-      extensions: harness.extensions?.summary() ?? null,
-    });
+    void (async () => {
+      try {
+        const state = await agentsState();
+        send(socket, {
+          type: "ready",
+          agent: "clawgate",
+          tools: harness.tools.names(),
+          defaultModel: harness.catalog.defaultRef(),
+          models: harness.catalog.list(),
+          extensions: harness.extensions?.summary() ?? null,
+          agents: state.agents,
+          scene: state.scene,
+          office: state.office,
+        });
+      } catch (error) {
+        log.warn(`could not greet board client: ${(error as Error).message}`);
+      }
+    })();
 
     socket.on("message", (data) => {
       void handleMessage(socket, data.toString());
@@ -289,6 +405,7 @@ export function createGateway(options: GatewayOptions) {
   return {
     server,
     broadcast,
+    agents,
     async start(port = config.port, host = config.host): Promise<number> {
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);

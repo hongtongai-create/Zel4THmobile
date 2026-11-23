@@ -1,11 +1,12 @@
 /* clawgate board service worker: offline app shell + stale-while-revalidate assets. */
-const CACHE = "clawgate-shell-v1";
+const CACHE = "clawgate-shell-v2";
 const SHELL = [
   "/",
   "/styles.css",
   "/app.js",
   "/manifest.webmanifest",
   "/favicon.svg",
+  "/assets/office.json",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/apple-touch-icon.png",

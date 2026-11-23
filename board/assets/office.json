@@ -1,0 +1,12 @@
+{
+  "scenes": [
+    { "id": "studio", "name": "สตูดิโอ", "image": "/assets/scenes/studio.svg" },
+    { "id": "night", "name": "ออฟฟิศกลางคืน", "image": "/assets/scenes/night.svg" },
+    { "id": "lab", "name": "แล็บ", "image": "/assets/scenes/lab.svg" }
+  ],
+  "characters": [
+    { "id": "claw", "name": "Claw", "image": "/assets/characters/claw.svg", "frames": 1, "fps": 0 },
+    { "id": "nova", "name": "Nova", "image": "/assets/characters/nova.svg", "frames": 1, "fps": 0 },
+    { "id": "bolt", "name": "Bolt", "image": "/assets/characters/bolt.svg", "frames": 1, "fps": 0 }
+  ]
+}

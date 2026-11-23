@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Claw">
+  <defs>
+    <linearGradient id="c-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9df3d3" />
+      <stop offset="1" stop-color="#46c99c" />
+    </linearGradient>
+  </defs>
+  <ellipse cx="60" cy="112" rx="26" ry="5" fill="#000" opacity=".28" />
+  <rect x="32" y="58" width="56" height="50" rx="18" fill="#22313d" stroke="#33495a" stroke-width="2" />
+  <rect x="48" y="72" width="24" height="22" rx="7" fill="url(#c-body)" opacity=".2" />
+  <rect x="26" y="70" width="10" height="24" rx="5" fill="#2c3f4d" />
+  <rect x="84" y="70" width="10" height="24" rx="5" fill="#2c3f4d" />
+  <circle cx="60" cy="38" r="25" fill="url(#c-body)" />
+  <rect x="43" y="30" width="34" height="18" rx="9" fill="#0d1a22" />
+  <circle cx="52" cy="39" r="3.3" fill="#b6ffe4" />
+  <circle cx="68" cy="39" r="3.3" fill="#b6ffe4" />
+  <path d="M60 13v-6" stroke="#46c99c" stroke-width="3" stroke-linecap="round" />
+  <circle cx="60" cy="6" r="3.6" fill="#b6ffe4" />
+  <path d="M52 92h16" stroke="#6ee7b7" stroke-width="3" stroke-linecap="round" opacity=".7" />
+  <path d="M38 104h44" stroke="#0f1a22" stroke-width="4" stroke-linecap="round" opacity=".5" />
+</svg>

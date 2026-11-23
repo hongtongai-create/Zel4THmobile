@@ -319,3 +319,59 @@ health/board assets, การปฏิเสธ token ผิด, การร�
 - `TELEGRAM_ALLOWED_CHAT_IDS` ว่าง = ไม่มีใครใช้งานได้ ถ้าต้องการเปิดให้ใครเพิ่ม ให้ใส่ chat id ของคนนั้น
   (รวมถึงการเพิ่มบอทเข้ากลุ่ม ซึ่งจะได้ chat id เป็นค่าลบ)
 - ข้อมูล session เก็บเป็นไฟล์ใน `data/` (ถูก gitignore) ลบโฟลเดอร์นี้เพื่อล้างทั้งหมด
+
+## Agents and the office view
+
+The board is not one assistant anymore: it is a small office of agents. Each agent is a
+profile in `data/agents.json` (no database) with its own name, emoji, role, identity text,
+default model, character sprite, position on the stage, and its own allowlist of skills,
+plugins and MCP servers.
+
+Create, move and configure agents entirely from the board, no `.env` edit and no terminal:
+
+- **Tap a character** (or its name in the drawer) to open its settings sheet: model,
+  name, emoji, role, identity text, character sprite, colour, and which installed
+  skills / plugins / MCP servers that agent may use.
+- **Drag a character** to move it; the position is stored server-side and synced to every
+  open board.
+- **Scene chips** at the bottom switch the office backdrop for every client.
+- **＋ Agent** (in the office bar or the drawer) creates another agent.
+- While an agent works, its character shows a bubble with the current tool and a pulse.
+
+Provider keys and channel tokens still live in `.env`: the board never accepts secrets.
+Everything else about an agent is editable in the UI.
+
+### Board protocol additions
+
+| frame | direction | meaning |
+| --- | --- | --- |
+| `ready` | server → client | now also carries `agents`, `scene` and `office` (scenes + characters) |
+| `agent.create` | client → server | `{ name, emoji, role, identity, model, color, sprite }` |
+| `agent.update` | client → server | `{ id, ...any of the fields above, x, y, skills, plugins, mcp }` |
+| `agent.delete` | client → server | `{ id }` |
+| `office.scene` | client → server | `{ scene }` |
+| `office.move` | client → server | `{ id, x, y }` (percent of the stage) |
+| `agents.state` | server → client | full agent + office state, broadcast after any change |
+
+`chat.send` accepts an optional `agentId`; that agent's identity, role and model are used
+for the turn, and only its allowed extension tools are offered to the model. Character
+conversations use the session id `board:agent:<agentId>`.
+
+### Using your own characters and scenes
+
+Drop images into `board/assets/scenes/` and `board/assets/characters/` — any `.svg`,
+`.png`, `.webp`, `.jpg` or `.gif` is picked up automatically and appears in the scene
+picker / character select. For an animated sprite sheet, describe it in
+`board/assets/office.json`:
+
+```json
+{
+  "scenes": [{ "id": "studio", "name": "สตูดิโอ", "image": "/assets/scenes/studio.svg" }],
+  "characters": [
+    { "id": "hero", "name": "Hero", "image": "/assets/characters/hero.png", "frames": 6, "fps": 8 }
+  ]
+}
+```
+
+`frames` is the number of frames in one horizontal strip and `fps` is the playback speed;
+the board animates the strip by itself. Files are served from the same origin as the board.

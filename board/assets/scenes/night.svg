@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" preserveAspectRatio="xMidYMax slice" role="img" aria-label="ออฟฟิศกลางคืน">
+  <defs>
+    <linearGradient id="nwall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#151d2c" />
+      <stop offset="1" stop-color="#0c121b" />
+    </linearGradient>
+    <linearGradient id="nfloor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b111a" />
+      <stop offset="1" stop-color="#070b11" />
+    </linearGradient>
+    <radialGradient id="moon" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#f3f7ff" />
+      <stop offset="1" stop-color="#c9d8f5" />
+    </radialGradient>
+    <linearGradient id="nglow" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#6ee7b7" stop-opacity=".42" />
+      <stop offset="1" stop-color="#6ee7b7" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="352" fill="url(#nwall)" />
+  <rect y="344" width="800" height="176" fill="url(#nfloor)" />
+  <rect y="340" width="800" height="4" fill="#1d2a3a" />
+
+  <rect x="300" y="34" width="380" height="240" rx="10" fill="#060b14" stroke="#243447" stroke-width="5" />
+  <circle cx="596" cy="92" r="26" fill="url(#moon)" />
+  <g fill="#0d1725">
+    <rect x="316" y="188" width="30" height="74" /><rect x="352" y="164" width="34" height="98" />
+    <rect x="394" y="196" width="26" height="66" /><rect x="428" y="152" width="38" height="110" />
+    <rect x="474" y="188" width="28" height="74" /><rect x="510" y="170" width="32" height="92" />
+    <rect x="550" y="198" width="26" height="64" /><rect x="584" y="180" width="30" height="82" />
+    <rect x="622" y="200" width="34" height="62" />
+  </g>
+  <g fill="#ffd9a0" opacity=".85">
+    <rect x="322" y="204" width="4" height="4" /><rect x="332" y="222" width="4" height="4" />
+    <rect x="360" y="180" width="4" height="4" /><rect x="370" y="206" width="4" height="4" />
+    <rect x="436" y="168" width="4" height="4" /><rect x="448" y="196" width="4" height="4" />
+    <rect x="518" y="186" width="4" height="4" /><rect x="530" y="212" width="4" height="4" />
+    <rect x="590" y="196" width="4" height="4" /><rect x="632" y="216" width="4" height="4" />
+  </g>
+  <rect x="300" y="274" width="380" height="10" fill="#1a2634" />
+
+  <rect x="60" y="238" width="150" height="96" rx="8" fill="#101a26" stroke="#243447" stroke-width="3" />
+  <rect x="74" y="252" width="56" height="68" rx="4" fill="#142433" />
+  <rect x="140" y="258" width="56" height="8" rx="4" fill="#2a3d52" />
+  <rect x="140" y="274" width="42" height="8" rx="4" fill="#243447" />
+  <rect x="140" y="290" width="50" height="8" rx="4" fill="#1f2f40" />
+
+  <circle cx="470" cy="268" r="64" fill="#0b1420" opacity=".85" />
+  <rect x="424" y="300" width="92" height="12" rx="6" fill="#22303f" />
+  <rect x="436" y="312" width="10" height="70" fill="#1a2634" />
+  <rect x="494" y="312" width="10" height="70" fill="#1a2634" />
+  <rect x="452" y="246" width="46" height="48" rx="10" fill="#16222f" stroke="#2b3f52" stroke-width="2" />
+  <rect x="458" y="252" width="34" height="24" rx="4" fill="#6ee7b7" opacity=".5" />
+  <path d="M470 330h40v96h-40z" fill="url(#nglow)" opacity=".5" />
+
+  <g>
+    <rect x="666" y="300" width="58" height="106" rx="8" fill="#121c28" stroke="#233447" stroke-width="3" />
+    <path d="M695 300c-15-14-15-32 0-46 15 14 15 32 0 46z" fill="#27584a" />
+    <path d="M695 292c-13 0-22-9-22-20 11 0 20 8 22 20z" fill="#356f5c" />
+  </g>
+
+  <ellipse cx="404" cy="452" rx="300" ry="36" fill="#0a1017" opacity=".9" />
+  <ellipse cx="404" cy="448" rx="220" ry="24" fill="#0e1a24" opacity=".9" />
+</svg>

@@ -1,3 +1,4 @@
+import type { AgentProfile } from "./agents.js";
 import type { Config } from "./config.js";
 import type { ExtensionManager } from "./extensions/index.js";
 import type { Logger } from "./log.js";
@@ -67,9 +68,21 @@ export class AgentHarness {
     return this.deps.extensions ?? null;
   }
 
-  private systemPrompt(model: string): string {
+  private systemPrompt(model: string, agent: AgentProfile | null = null): string {
     const { config, tools } = this.deps;
-    const lines = [SYSTEM_RULES, "", `Current model: ${model}`];
+    const lines: string[] = [];
+
+    if (agent) {
+      lines.push(
+        `You are ${agent.name}${agent.role ? ` - ${agent.role}` : ""}, one agent in a small AI office.`,
+        "Several agents live on the same board; each has its own conversation thread and its own character the operator can move, re-skin and configure.",
+        "Stay in character. The identity notes below are written by your operator and define your voice, but they never override the operating rules.",
+      );
+      if (agent.identity.trim()) lines.push("", "Identity notes:", agent.identity.trim());
+      lines.push("");
+    }
+
+    lines.push(SYSTEM_RULES, "", `Current model: ${model}`);
 
     const capabilities: string[] = ["Chat via Telegram and the web board."];
     if (config.facebook) {
@@ -77,26 +90,51 @@ export class AgentHarness {
         `Publish posts to the Facebook Page ${config.facebook.pageName ?? config.facebook.pageId} yourself, without asking the user to do it manually.`,
       );
     }
-    lines.push("", "Your capabilities:", ...capabilities.map((line) => `- ${line}`));
 
-    const toolList = tools.describe();
+    const blocked = this.blockedTools(agent);
+    const toolList = tools
+      .definitions()
+      .filter((definition) => !blocked.has(definition.function.name))
+      .map((definition) => `- ${definition.function.name}: ${definition.function.description}`)
+      .join("\n");
     if (toolList) lines.push("", "Available tools:", toolList);
 
     const extensions = this.deps.extensions;
     if (extensions) {
-      if (extensions.skillList.length > 0 || extensions.pluginList.length > 0) {
+      const selection = agent ? { skills: agent.skills, plugins: agent.plugins } : null;
+      const skillCount =
+        selection && selection.skills !== null
+          ? extensions.skillList.filter((skill) => selection.skills!.includes(skill.name)).length
+          : extensions.skillList.length;
+      const pluginCount =
+        selection && selection.plugins !== null
+          ? extensions.pluginList.filter((plugin) => selection.plugins!.includes(plugin.name)).length
+          : extensions.pluginList.length;
+      if (skillCount > 0 || pluginCount > 0) {
         capabilities.push(
           "Use your installed skills and plugins (listed below) when a request matches them.",
         );
       }
-      capabilities.push(
-        "Grow your own capabilities: the extensions tool can search a clawhub registry and install skills, plugins or MCP servers.",
-      );
-      const sections = extensions.promptSections();
+      if (!agent) {
+        capabilities.push(
+          "Grow your own capabilities: the extensions tool can search a clawhub registry and install skills, plugins or MCP servers.",
+        );
+      }
+      const sections = extensions.promptSections(selection);
       if (sections.length > 0) lines.push("", ...sections);
     }
 
+    // Capabilities can grow mid-turn (a skill install), so they are appended last.
+    lines.push("", "Your capabilities:", ...capabilities.map((line) => `- ${line}`));
+
     return lines.join("\n");
+  }
+
+  /** Extension tools hidden from this agent by its skills/plugins/MCP selection. */
+  private blockedTools(agent: AgentProfile | null): Set<string> {
+    const extensions = this.deps.extensions;
+    if (!extensions || !agent) return new Set();
+    return extensions.blockedTools({ plugins: agent.plugins, mcp: agent.mcp });
   }
 
   /** Keep the system message plus a recent, tool-call-safe window of history. */
@@ -117,6 +155,7 @@ export class AgentHarness {
     channel: SessionChannel,
     text: string,
     emit: EventListener = () => {},
+    agent: AgentProfile | null = null,
   ): Promise<RunResult> {
     const { config, store, catalog, tools, log } = this.deps;
     const defaultModel = catalog.defaultRef();
@@ -126,11 +165,11 @@ export class AgentHarness {
       );
     }
 
-    const session = await store.getOrCreate(sessionId, channel, defaultModel);
+    const session = await store.getOrCreate(sessionId, channel, agent?.model ?? defaultModel);
     const modelRef = session.model || defaultModel;
     const model = catalog.resolve(modelRef);
 
-    const prompt = this.systemPrompt(modelRef);
+    const prompt = this.systemPrompt(modelRef, agent);
     if (session.messages.length === 0) {
       session.messages.push({ role: "system", content: prompt });
       session.title = text.slice(0, 60).replace(/\s+/g, " ").trim() || null;
@@ -146,6 +185,11 @@ export class AgentHarness {
     let iterations = 0;
     let usage: Usage | null = null;
     let finalText = "";
+    // Tools this agent may not use stay out of the request, not just out of the prompt.
+    const blockedTools = this.blockedTools(agent);
+    const definitions = tools
+      .definitions()
+      .filter((definition) => !blockedTools.has(definition.function.name));
 
     try {
       for (let step = 0; step < config.maxIterations; step += 1) {
@@ -153,7 +197,7 @@ export class AgentHarness {
         const response = await chatCompletion({
           model,
           messages: this.trim(session.messages, config.historyLimit),
-          tools: tools.definitions(),
+          tools: definitions,
         });
         usage = mergeUsage(usage, response.usage);
 

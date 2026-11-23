@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Bolt">
+  <defs>
+    <linearGradient id="b-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fde68a" />
+      <stop offset="1" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <ellipse cx="60" cy="112" rx="25" ry="5" fill="#000" opacity=".28" />
+  <rect x="34" y="62" width="52" height="44" rx="16" fill="#3a2d18" stroke="#5b4726" stroke-width="2" />
+  <rect x="48" y="76" width="24" height="18" rx="6" fill="url(#b-body)" opacity=".2" />
+  <rect x="20" y="70" width="12" height="20" rx="6" fill="#4a3a20" />
+  <rect x="88" y="70" width="12" height="20" rx="6" fill="#4a3a20" />
+  <rect x="34" y="22" width="52" height="44" rx="14" fill="url(#b-body)" />
+  <rect x="42" y="34" width="36" height="20" rx="8" fill="#241a0c" />
+  <circle cx="52" cy="44" r="3.6" fill="#fff3c4" />
+  <circle cx="68" cy="44" r="3.6" fill="#fff3c4" />
+  <path d="M44 18V9M76 18V9" stroke="#f59e0b" stroke-width="3" stroke-linecap="round" />
+  <path d="M58 68l-6 12h8l-4 12 12-16h-8l6-8z" fill="#fde68a" opacity=".75" />
+  <path d="M36 100h48" stroke="#241a0c" stroke-width="3" stroke-linecap="round" opacity=".4" />
+</svg>

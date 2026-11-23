@@ -3,6 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline/promises";
 import { AgentHarness } from "./agent.js";
+import { AgentRegistry } from "./agents.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { loadConfig, loadDotEnv } from "./config.js";
 import { ExtensionManager } from "./extensions/index.js";
@@ -27,6 +28,8 @@ async function bootstrap(options: { extensions?: boolean } = {}) {
   const store = new SessionStore(config.dataDir);
   await store.init();
   const tools = createToolRegistry(config);
+  const agents = new AgentRegistry(config.dataDir);
+  await agents.list();
   const ledger = new UsageLedger(config.dataDir, config.prices);
   await ledger.init();
 
@@ -47,7 +50,7 @@ async function bootstrap(options: { extensions?: boolean } = {}) {
     log: createLogger("agent"),
     extensions: extensions ?? undefined,
   });
-  return { config, catalog, store, tools, ledger, extensions, harness };
+  return { config, catalog, store, tools, ledger, extensions, harness, agents };
 }
 
 function printModels(catalog: ModelCatalog): void {
@@ -124,7 +127,7 @@ async function runUsage(): Promise<void> {
 }
 
 async function runGateway(): Promise<void> {
-  const { config, catalog, tools, harness, extensions } = await bootstrap({ extensions: true });
+  const { config, catalog, tools, harness, extensions, agents } = await bootstrap({ extensions: true });
 
   if (catalog.isEmpty) {
     log.warn("no model providers configured - set OPENAI_API_KEY, OPENROUTER_API_KEY, OLLAMA_ENABLED=1 or LLM_BASE_URL");
@@ -133,7 +136,7 @@ async function runGateway(): Promise<void> {
   }
   log.info(`tools: ${tools.names().join(", ") || "none"}`);
 
-  const gateway = createGateway({ config, harness, log: createLogger("gateway") });
+  const gateway = createGateway({ config, harness, log: createLogger("gateway"), agents });
   const port = await gateway.start();
 
   console.log("");
