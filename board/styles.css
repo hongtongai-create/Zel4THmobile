@@ -9,6 +9,7 @@
   --accent-dim: #1f3f37;
   --danger: #f87171;
   --radius: 14px;
+  --actor-size: 132px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -817,13 +818,34 @@ body[data-view="office"] .office {
   background: radial-gradient(700px 420px at 50% 10%, #16222c 0%, #0a0f15 70%);
 }
 
+/* ฉาก: ภาพหลักแสดงเต็มเฟรม (ไม่ครอป) ซ้อนบนพื้นหลังเบลอของภาพเดียวกัน */
 .scene-layer {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   background-size: cover;
   background-position: center bottom;
   background-repeat: no-repeat;
   pointer-events: none;
+}
+
+.scene-layer::before {
+  content: "";
+  position: absolute;
+  inset: -32px;
+  background-image: inherit;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(26px) brightness(0.4);
+}
+
+.scene-frame {
+  position: absolute;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  box-shadow: 0 24px 70px #00000080;
 }
 
 .stage-empty {
@@ -848,6 +870,7 @@ body[data-view="office"] .office {
 .actor {
   position: absolute;
   transform: translate(-50%, -50%);
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -864,11 +887,12 @@ body[data-view="office"] .office {
 .actor.dragging {
   cursor: grabbing;
   z-index: 6;
+  transition: none;
 }
 
 .actor-avatar {
-  width: 78px;
-  height: 78px;
+  width: var(--actor-size);
+  height: var(--actor-size);
   border-radius: 22px;
   display: grid;
   place-items: center;
@@ -885,11 +909,20 @@ body[data-view="office"] .office {
 }
 
 .actor-sprite {
-  width: 78px;
-  height: 78px;
+  width: 100%;
+  height: 100%;
   background-repeat: no-repeat;
   background-position: 0 0;
-  background-size: contain;
+  background-size: calc(var(--actor-size) * var(--frames, 1)) var(--actor-size);
+}
+
+@keyframes sprite-play {
+  from {
+    background-position-x: 0px;
+  }
+  to {
+    background-position-x: calc(var(--actor-size) * var(--frames, 1) * -1);
+  }
 }
 
 .actor.focused .actor-avatar {
@@ -901,6 +934,28 @@ body[data-view="office"] .office {
   animation: pulse 1.5s ease-in-out infinite;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--actor-color, #6ee7b7) 35%, transparent),
     0 14px 30px #000000a0;
+}
+
+/* ตัวละครแบบสไปรท์มีภาพโปร่งใสในตัว ไม่ต้องมีกรอบ/surface ของ avatar เดิม */
+.actor-avatar.sprite {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  filter: drop-shadow(0 10px 16px #000000a0);
+}
+
+.actor.focused .actor-avatar.sprite {
+  box-shadow: none;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--actor-color, #6ee7b7) 85%, transparent))
+    drop-shadow(0 10px 16px #000000a0);
+}
+
+.actor.working .actor-avatar.sprite {
+  box-shadow: none;
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--actor-color, #6ee7b7) 65%, transparent))
+    drop-shadow(0 10px 16px #000000a0);
 }
 
 .actor-name {

@@ -30,6 +30,7 @@ const els = {
   chatView: document.getElementById("chat-view"),
   stage: document.getElementById("stage"),
   sceneLayer: document.getElementById("scene-layer"),
+  sceneFrame: document.getElementById("scene-frame"),
   scenePicker: document.getElementById("scene-picker"),
   stageEmpty: document.getElementById("stage-empty"),
   agentSheet: document.getElementById("agent-sheet"),
@@ -56,7 +57,8 @@ const SESSION_KEY = "clawgate.session";
 const TOKEN_KEY = "clawgate.token";
 const MODEL_KEY = "clawgate.model";
 const AGENT_PREFIX = "board:agent:";
-const ACTOR_SIZE = 78;
+const SCENE_FALLBACK_ASPECT = 1086 / 1448;
+let sceneAspect = SCENE_FALLBACK_ASPECT;
 
 const state = {
   ws: null,
@@ -417,15 +419,51 @@ function renderExtensions(diagnostics) {
 
 /* ---------- office ---------- */
 
+function layoutSceneFrame() {
+  const frame = els.sceneFrame;
+  if (!frame) return;
+  const w = els.stage.clientWidth;
+  const h = els.stage.clientHeight;
+  if (w <= 0 || h <= 0) return;
+  let fw = w;
+  let fh = w / sceneAspect;
+  if (fh > h) {
+    fh = h;
+    fw = h * sceneAspect;
+  }
+  frame.style.width = `${Math.round(fw)}px`;
+  frame.style.height = `${Math.round(fh)}px`;
+  frame.style.left = `${Math.round((w - fw) / 2)}px`;
+  frame.style.top = `${Math.round(h - fh)}px`;
+  const actorSize = Math.round(clamp(Math.min(w, h) * 0.19, 104, 160));
+  document.documentElement.style.setProperty("--actor-size", `${actorSize}px`);
+}
+
+function applyScene(scene) {
+  const url = scene ? `url("${scene.image}")` : "none";
+  els.sceneLayer.style.backgroundImage = url;
+  els.sceneFrame.style.backgroundImage = url;
+  els.stage.classList.toggle("no-scene", !scene);
+  layoutSceneFrame();
+  if (!scene) return;
+  const img = new Image();
+  img.onload = () => {
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    if (els.sceneFrame.style.backgroundImage !== url) return;
+    sceneAspect = img.naturalWidth / img.naturalHeight;
+    layoutSceneFrame();
+  };
+  img.src = scene.image;
+}
+
 function renderOffice() {
-  els.stage.querySelectorAll(".actor").forEach((node) => node.remove());
+  els.sceneFrame.querySelectorAll(".actor").forEach((node) => node.remove());
 
   const scenes = state.office.scenes ?? [];
   const scene = scenes.find((entry) => entry.id === state.scene) ?? scenes[0] ?? null;
-  els.sceneLayer.style.backgroundImage = scene ? `url("${scene.image}")` : "none";
-  els.stage.classList.toggle("no-scene", !scene);
+  applyScene(scene);
 
-  for (const agent of state.agents) els.stage.append(buildActor(agent));
+  for (const agent of state.agents) els.sceneFrame.append(buildActor(agent));
 
   els.stageEmpty.hidden = state.agents.length > 0;
   renderScenePicker();
@@ -435,7 +473,7 @@ function renderOffice() {
 }
 
 function actorEl(id) {
-  return [...els.stage.querySelectorAll(".actor")].find((node) => node.dataset.id === id) ?? null;
+  return [...els.sceneFrame.querySelectorAll(".actor")].find((node) => node.dataset.id === id) ?? null;
 }
 
 function buildActor(agent) {
@@ -461,18 +499,11 @@ function buildActor(agent) {
     sprite.style.backgroundImage = `url("${image}")`;
     const frames = Math.max(1, asset?.frames ?? 1);
     if (frames > 1) {
-      sprite.style.backgroundSize = `${ACTOR_SIZE * frames}px ${ACTOR_SIZE}px`;
-      if (typeof sprite.animate === "function") {
-        sprite.animate(
-          [{ backgroundPositionX: "0px" }, { backgroundPositionX: `${-ACTOR_SIZE * frames}px` }],
-          {
-            duration: ((asset?.fps || 6) > 0 ? 1000 / (asset?.fps || 6) : 160) * frames,
-            iterations: Infinity,
-            easing: `steps(${frames}, end)`,
-          },
-        );
-      }
+      const fps = (asset?.fps || 6) > 0 ? asset.fps || 6 : 6;
+      sprite.style.setProperty("--frames", String(frames));
+      sprite.style.animation = `sprite-play ${Math.round((1000 / fps) * frames)}ms steps(${frames}, end) infinite`;
     }
+    avatar.classList.add("sprite");
     avatar.append(sprite);
   } else {
     avatar.classList.add("emoji");
@@ -495,7 +526,7 @@ function buildActor(agent) {
       return;
     }
     drag.moved = true;
-    const rect = els.stage.getBoundingClientRect();
+    const rect = els.sceneFrame.getBoundingClientRect();
     const x = clamp(((event.clientX - rect.left) / rect.width) * 100, 2, 96);
     const y = clamp(((event.clientY - rect.top) / rect.height) * 100, 8, 94);
     actor.style.left = `${x}%`;
@@ -1219,6 +1250,9 @@ els.install.addEventListener("click", async () => {
   els.install.hidden = true;
   closeDrawer();
 });
+
+window.addEventListener("resize", layoutSceneFrame);
+window.addEventListener("orientationchange", layoutSceneFrame);
 
 if (window.matchMedia("(display-mode: standalone)").matches) {
   els.install.hidden = true;

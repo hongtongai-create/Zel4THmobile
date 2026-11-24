@@ -47,7 +47,7 @@ const DEFAULT_AGENT: Omit<AgentProfile, "createdAt" | "updatedAt"> = {
   plugins: null,
   mcp: null,
   color: "#6ee7b7",
-  sprite: "claw",
+  sprite: "sirius",
   x: 34,
   y: 62,
 };

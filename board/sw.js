@@ -1,5 +1,5 @@
 /* clawgate board service worker: offline app shell + stale-while-revalidate assets. */
-const CACHE = "clawgate-shell-v3";
+const CACHE = "clawgate-shell-v7";
 const SHELL = [
   "/",
   "/styles.css",

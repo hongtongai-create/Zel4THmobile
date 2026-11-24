@@ -1,12 +1,17 @@
 {
   "scenes": [
-    { "id": "studio", "name": "สตูดิโอ", "image": "/assets/scenes/studio.svg" },
-    { "id": "night", "name": "ออฟฟิศกลางคืน", "image": "/assets/scenes/night.svg" },
-    { "id": "lab", "name": "แล็บ", "image": "/assets/scenes/lab.svg" }
+    { "id": "lobby-day", "name": "ล็อบบี้กลางวัน", "image": "/assets/scenes/lobby-day.webp" },
+    { "id": "hq-office", "name": "ออฟฟิศ Six Squad", "image": "/assets/scenes/hq-office.webp" },
+    { "id": "studio", "name": "สตูดิโอ", "image": "/assets/scenes/studio.webp" },
+    { "id": "lobby-night", "name": "ล็อบบี้กลางคืน", "image": "/assets/scenes/lobby-night.webp" },
+    { "id": "dorm", "name": "หอพักทีม", "image": "/assets/scenes/dorm.webp" }
   ],
   "characters": [
-    { "id": "claw", "name": "Claw", "image": "/assets/characters/claw.svg", "frames": 1, "fps": 0 },
-    { "id": "nova", "name": "Nova", "image": "/assets/characters/nova.svg", "frames": 1, "fps": 0 },
-    { "id": "bolt", "name": "Bolt", "image": "/assets/characters/bolt.svg", "frames": 1, "fps": 0 }
+    { "id": "sirius", "name": "Sirius", "image": "/assets/characters/sirius-front.webp", "frames": 4, "fps": 6 },
+    { "id": "polaris", "name": "Polaris", "image": "/assets/characters/polaris-front.webp", "frames": 4, "fps": 6 },
+    { "id": "capella", "name": "Capella", "image": "/assets/characters/capella-front.webp", "frames": 4, "fps": 6 },
+    { "id": "altair", "name": "Altair", "image": "/assets/characters/altair-front.webp", "frames": 4, "fps": 6 },
+    { "id": "antares", "name": "Antares", "image": "/assets/characters/antares-front.webp", "frames": 4, "fps": 6 },
+    { "id": "draco", "name": "Draco", "image": "/assets/characters/draco-front.webp", "frames": 4, "fps": 6 }
   ]
 }
