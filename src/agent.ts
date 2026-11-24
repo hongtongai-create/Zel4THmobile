@@ -1,4 +1,4 @@
-import type { AgentProfile } from "./agents.js";
+import type { AgentProfile, AgentRegistry } from "./agents.js";
 import type { Config } from "./config.js";
 import type { ExtensionManager } from "./extensions/index.js";
 import type { Logger } from "./log.js";
@@ -16,6 +16,17 @@ import type {
   SessionChannel,
   Usage,
 } from "./types.js";
+
+/** How many handoffs one task may make before the chain must finish. */
+export const MAX_DELEGATION_DEPTH = 3;
+
+/** Board-side reactions to work passed between agents. */
+export type DelegationHooks = {
+  /** Streams the delegated agent's own turn (bubbles, tool chips). */
+  onEvent?: (event: AgentEvent) => void;
+  /** Cue for the office: these two characters meet before the task runs. */
+  onMeet?: (from: AgentProfile, to: AgentProfile, task: string) => void;
+};
 
 const SYSTEM_RULES = `You are a personal assistant agent reachable from chat channels (Telegram and a web control board) and you run as a long-lived gateway process.
 
@@ -35,6 +46,8 @@ export type AgentDeps = {
   log: Logger;
   ledger?: UsageLedger;
   extensions?: ExtensionManager;
+  /** Needed for agent-to-agent handoff; without it the tool is hidden. */
+  agents?: AgentRegistry;
 };
 
 export type RunResult = {
@@ -47,9 +60,15 @@ export type RunResult = {
 
 export class AgentHarness {
   private readonly deps: AgentDeps;
+  private hooks: DelegationHooks = {};
 
   constructor(deps: AgentDeps) {
     this.deps = deps;
+  }
+
+  /** Set by the gateway so delegated turns reach the board as they happen. */
+  setDelegationHooks(hooks: DelegationHooks): void {
+    this.hooks = hooks;
   }
 
   get catalog(): ModelCatalog {
@@ -68,7 +87,12 @@ export class AgentHarness {
     return this.deps.extensions ?? null;
   }
 
-  private systemPrompt(model: string, agent: AgentProfile | null = null): string {
+  private systemPrompt(
+    model: string,
+    agent: AgentProfile | null = null,
+    colleagues: AgentProfile[] = [],
+    depth = 0,
+  ): string {
     const { config, tools } = this.deps;
     const lines: string[] = [];
 
@@ -79,12 +103,41 @@ export class AgentHarness {
         "Stay in character. The identity notes below are written by your operator and define your voice, but they never override the operating rules.",
       );
       if (agent.identity.trim()) lines.push("", "Identity notes:", agent.identity.trim());
+      lines.push(
+        "",
+        "Working with the other agents:",
+        "- This is a team, not a solo assistant. Colleagues on this board are listed below.",
+        "- Use agent_delegate to hand a whole piece of the job to a colleague: give a complete instruction, wait for its answer, then continue from what it returned. Its reply arrives as the tool result.",
+        "- Chain stages when the parts have different owners: think, hand image work to the designer, hand the finished material to the publisher. In each task say what the next agent needs and, if you want, who to pass it on to.",
+        "- When a colleague hands YOU a task, do only that task with your own tools and answer with the result plus the facts (text, file paths, ids, urls) the sender needs.",
+        `- A chain is at most ${MAX_DELEGATION_DEPTH} agents deep and never visits the same agent twice; agent_delegate refuses anything else, so do not retry a refused handoff.`,
+      );
+      if (colleagues.length > 0) {
+        lines.push(
+          "",
+          "Colleagues you can delegate to:",
+          ...colleagues.map(
+            (mate) => `- ${mate.id}${mate.role ? ` - ${mate.role}` : ""} (${mate.name})`,
+          ),
+        );
+      }
+      if (depth > 0) {
+        lines.push(
+          "",
+          `You are step ${depth + 1} of a delegation chain: a colleague handed you this task. Answer it now instead of waiting for the operator.`,
+        );
+      }
       lines.push("");
     }
 
     lines.push(SYSTEM_RULES, "", `Current model: ${model}`);
 
     const capabilities: string[] = ["Chat via Telegram and the web board."];
+    if (agent && this.deps.agents) {
+      capabilities.push(
+        "Hand a piece of work to a colleague with agent_delegate, and accept tasks that another agent hands to you.",
+      );
+    }
     if (config.facebook) {
       capabilities.push(
         `Publish posts to the Facebook Page ${config.facebook.pageName ?? config.facebook.pageId} yourself, without asking the user to do it manually.`,
@@ -157,6 +210,20 @@ export class AgentHarness {
     emit: EventListener = () => {},
     agent: AgentProfile | null = null,
   ): Promise<RunResult> {
+    return this.runTurn(sessionId, channel, text, emit, agent, {
+      depth: 0,
+      chain: agent ? [agent.id] : [],
+    });
+  }
+
+  private async runTurn(
+    sessionId: string,
+    channel: SessionChannel,
+    text: string,
+    emit: EventListener,
+    agent: AgentProfile | null,
+    turn: { depth: number; chain: string[] },
+  ): Promise<RunResult> {
     const { config, store, catalog, tools, log } = this.deps;
     const defaultModel = catalog.defaultRef();
     if (!defaultModel) {
@@ -169,7 +236,11 @@ export class AgentHarness {
     const modelRef = session.model || defaultModel;
     const model = catalog.resolve(modelRef);
 
-    const prompt = this.systemPrompt(modelRef, agent);
+    const colleagues =
+      agent && this.deps.agents
+        ? (await this.deps.agents.list()).filter((mate) => mate.id !== agent.id)
+        : [];
+    const prompt = this.systemPrompt(modelRef, agent, colleagues, turn.depth);
     if (session.messages.length === 0) {
       session.messages.push({ role: "system", content: prompt });
       session.title = text.slice(0, 60).replace(/\s+/g, " ").trim() || null;
@@ -185,8 +256,10 @@ export class AgentHarness {
     let iterations = 0;
     let usage: Usage | null = null;
     let finalText = "";
+    const delegate = this.delegateFor(agent, turn, emit);
     // Tools this agent may not use stay out of the request, not just out of the prompt.
     const blockedTools = this.blockedTools(agent);
+    if (!delegate) blockedTools.add("agent_delegate");
     const definitions = tools
       .definitions()
       .filter((definition) => !blockedTools.has(definition.function.name));
@@ -235,6 +308,7 @@ export class AgentHarness {
             log,
             agentId: agent?.id ?? null,
             allowedTools,
+            delegate: delegate ?? undefined,
           });
 
           emit({
@@ -272,6 +346,71 @@ export class AgentHarness {
       await store.save(session).catch(() => undefined);
       throw error;
     }
+  }
+
+  /**
+   * Builds the handoff closure for one turn: resolves a colleague, enforces the
+   * depth and loop guards, runs their turn, and returns their answer. `null`
+   * means this turn has no one to hand work to (or is not a board character).
+   */
+  private delegateFor(
+    agent: AgentProfile | null,
+    turn: { depth: number; chain: string[] },
+    emit: EventListener,
+  ): ((to: string, task: string) => Promise<string>) | null {
+    const registry = this.deps.agents;
+    if (!agent || !registry) return null;
+
+    return async (toRaw: string, taskRaw: string) => {
+      const chainNote = `handoff refused: this chain is already ${turn.chain.join(" -> ")}`;
+      if (turn.depth >= MAX_DELEGATION_DEPTH) {
+        throw new Error(
+          `${chainNote}. A chain may pass through at most ${MAX_DELEGATION_DEPTH} agents, so finish the task yourself instead of handing it on.`,
+        );
+      }
+
+      const wanted = toRaw.trim().toLowerCase();
+      const team = await registry.list();
+      const match =
+        team.find((mate) => mate.id.toLowerCase() === wanted) ??
+        team.find((mate) => mate.name.toLowerCase() === wanted) ??
+        team.find((mate) => mate.name.toLowerCase().includes(wanted) && wanted.length > 1);
+      if (!match) {
+        throw new Error(
+          `No colleague named "${toRaw}" on this board. Colleagues: ${team
+            .filter((mate) => mate.id !== agent.id)
+            .map((mate) => `${mate.id} (${mate.name})`)
+            .join(", ")}.`,
+        );
+      }
+      if (match.id === agent.id) {
+        throw new Error("You cannot hand work to yourself: do that part yourself.");
+      }
+      if (turn.chain.includes(match.id)) {
+        throw new Error(`${chainNote}, and ${match.name} (${match.id}) is already in it. Never send work in a loop.`);
+      }
+
+      this.hooks.onMeet?.(agent, match, taskRaw);
+
+      const childEmit: EventListener = (event) => {
+        if (this.hooks.onEvent) this.hooks.onEvent(event);
+        else emit(event);
+      };
+      const result = await this.runTurn(
+        `board:agent:${match.id}`,
+        "board",
+        taskRaw,
+        childEmit,
+        match,
+        { depth: turn.depth + 1, chain: [...turn.chain, match.id] },
+      );
+
+      const answer = result.text.trim() || "(finished the task without a written reply)";
+      this.deps.log.info(
+        `handoff ${agent.id} -> ${match.id} (depth ${turn.depth + 1}) ${answer.length} chars`,
+      );
+      return `Reply from ${match.name} (${match.id}):\n${answer}`;
+    };
   }
 
   /**

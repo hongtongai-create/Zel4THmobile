@@ -1034,6 +1034,21 @@ function handleFrame(frame) {
       applyAgentState(frame);
       break;
 
+    case "office.talk": {
+      // One character handed work to another: both say so while they walk together.
+      const from = findAgent(frame.from);
+      const to = findAgent(frame.to);
+      setActivity(frame.from, {
+        busy: true,
+        text: `⇢ ${to?.name ?? frame.toName ?? frame.to}: ${frame.text ?? ""}`,
+      });
+      setActivity(frame.to, {
+        busy: true,
+        text: `… รับงานจาก ${from?.name ?? frame.fromName ?? frame.from}`,
+      });
+      break;
+    }
+
     case "models.list":
       renderModels(frame.models ?? [], frame.default ?? null);
       break;

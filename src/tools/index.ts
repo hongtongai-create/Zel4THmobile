@@ -1,6 +1,7 @@
 import type { Config } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ToolDefinition } from "../models.js";
+import { createDelegateTool } from "./delegate.js";
 import { createFacebookTool } from "./facebook.js";
 
 export type ToolContext = {
@@ -8,6 +9,12 @@ export type ToolContext = {
   log: Logger;
   /** Set when a character runs the turn; used for audit and approvals. */
   agentId?: string | null;
+  /**
+   * Set only when a board character runs the turn: hands a task to a colleague
+   * and resolves with that colleague's answer. Depth and loop guards live in
+   * the harness, so a persona cannot walk around them.
+   */
+  delegate?: (to: string, task: string) => Promise<string>;
   /**
    * Extension tools this turn may call. Built-in tools are always allowed;
    * anything from a plugin or MCP server is checked here at invoke time, not
@@ -126,5 +133,6 @@ export class ToolRegistry {
 export function createToolRegistry(config: Config): ToolRegistry {
   const registry = new ToolRegistry();
   if (config.facebook) registry.register(createFacebookTool(config.facebook));
+  registry.register(createDelegateTool());
   return registry;
 }

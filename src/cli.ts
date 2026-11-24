@@ -59,6 +59,7 @@ async function bootstrap(options: { extensions?: boolean } = {}) {
     ledger,
     log: createLogger("agent"),
     extensions: extensions ?? undefined,
+    agents,
   });
   return { config, catalog, store, tools, ledger, extensions, harness, agents, approvals };
 }

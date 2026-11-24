@@ -34,6 +34,52 @@ const stub = createServer((req, res) => {
         payload.tools.some((tool) => tool.function.name === "facebook_post"),
         "facebook_post tool should be registered",
       );
+
+      // Delegation scenarios: main hands the job to Nova, and a self-handoff is refused.
+      const system = payload.messages[0]?.content ?? "";
+      const lastUserIndex = payload.messages.map((message) => message.role).lastIndexOf("user");
+      const lastUser = payload.messages[lastUserIndex]?.content ?? "";
+      // Only a tool result from THIS turn means the tool call already happened; older
+      // turns keep their tool messages in the stored history.
+      const hasToolResult = payload.messages
+        .slice(lastUserIndex + 1)
+        .some((message) => message.role === "tool");
+      const answer = (message) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            choices: [{ message }],
+            usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+          }),
+        );
+        return true;
+      };
+      const delegateTo = (id, task) => ({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: id,
+            type: "function",
+            function: { name: "agent_delegate", arguments: JSON.stringify({ to: id, task }) },
+          },
+        ],
+      });
+      if (lastUser.includes("delegate-check")) {
+        if (hasToolResult) return answer({ role: "assistant", content: "Handed off and got the result." });
+        return answer(delegateTo("nova", "make the image"));
+      }
+      if (lastUser.includes("loop-check")) {
+        if (hasToolResult) return answer({ role: "assistant", content: "I will do it myself." });
+        return answer(delegateTo("main", "pass this on again"));
+      }
+      if (lastUser === "make the image") {
+        return answer({ role: "assistant", content: "IMAGE-OK" });
+      }
+      if (/You are Nova/.test(system) && !lastUser.includes("make the image")) {
+        return answer({ role: "assistant", content: "Nova here." });
+      }
+
       res.writeHead(200, { "content-type": "application/json" });
       if (modelCalls === 1) {
         res.end(
@@ -172,11 +218,14 @@ async function main() {
   const { ModelCatalog } = await import("../dist/models.js");
   const { SessionStore } = await import("../dist/store.js");
   const { createToolRegistry } = await import("../dist/tools/index.js");
+  const { AgentRegistry } = await import("../dist/agents.js");
   const { createGateway } = await import("../dist/gateway/server.js");
   const { createLogger } = await import("../dist/log.js");
   const { UsageLedger } = await import("../dist/usage.js");
   const { LineChannel } = await import("../dist/channels/line.js");
   const { ApprovalQueue } = await import("../dist/extensions/approvals.js");
+  const { ApprovalService } = await import("../dist/extensions/approval-service.js");
+  const { ApprovalRelay } = await import("../dist/extensions/approval-relay.js");
   const { createHmac } = await import("node:crypto");
 
   const config = loadConfig();
@@ -187,10 +236,22 @@ async function main() {
   const tools = createToolRegistry(config);
   const ledger = new UsageLedger(config.dataDir, config.prices);
   await ledger.init();
-  const harness = new AgentHarness({ config, store, catalog, tools, ledger, log });
-  const line = new LineChannel(config.line, harness, createLogger("line"));
+  const agents = new AgentRegistry(config.dataDir);
+  const harness = new AgentHarness({ config, store, catalog, tools, ledger, log, agents });
   const approvals = new ApprovalQueue();
-  const gateway = createGateway({ config, harness, log: createLogger("gateway"), line, approvals });
+  const approvalService = new ApprovalService(approvals, () => harness.extensions ?? null);
+  const line = new LineChannel(config.line, harness, createLogger("line"), undefined, {
+    approvals: approvalService,
+  });
+  const gateway = createGateway({
+    config,
+    harness,
+    log: createLogger("gateway"),
+    agents,
+    line,
+    approvals,
+    approvalService,
+  });
 
   const port = await gateway.start(0, "127.0.0.1");
   const wsBase = `ws://127.0.0.1:${port}`;
@@ -231,7 +292,7 @@ async function main() {
     const { socket, inbox } = client;
     const ready = await inbox.next((frame) => frame.type === "ready", "ready frame");
     assert.equal(ready.defaultModel, "custom:smoke-model");
-    assert.deepEqual(ready.tools, ["facebook_post"]);
+    assert.deepEqual(ready.tools, ["facebook_post", "agent_delegate"]);
     check("ready frame carries models and tools");
 
     // 6. Model selection
@@ -325,8 +386,9 @@ async function main() {
     // 12. Agents: create, configure, move, chat with a character, delete
     assert.ok(Array.isArray(ready.agents) && ready.agents.length === 1, "gateway seeds one default agent");
     assert.equal(ready.agents[0].id, "main");
-    assert.equal(ready.office.scenes.length, 3, "scenes come from board/assets/office.json");
-    assert.equal(ready.office.characters.length, 3);
+    assert.equal(ready.office.scenes.length, 5, "scenes come from board/assets/office.json");
+    assert.equal(ready.office.characters.length, 6);
+    assert.equal(ready.office.characters[0].frames, 4, "characters use the 4-frame sprite sheet");
     check("ready frame carries agents and office assets");
 
     socket.send(
@@ -379,6 +441,78 @@ async function main() {
     assert.match(novaSystem, /writer/);
     assert.match(novaSystem, /You write one-line posts\./);
     check("chatting with a character uses its identity, role and model");
+
+    // 12b. Agent-to-agent handoff: one character passes work to a colleague.
+    socket.send(
+      JSON.stringify({
+        type: "chat.send",
+        sessionId: "board:agent:main",
+        agentId: "main",
+        text: "delegate-check",
+      }),
+    );
+    const handoff = await inbox.next(
+      (frame) =>
+        frame.type === "event" &&
+        frame.event.type === "tool.start" &&
+        frame.event.name === "agent_delegate" &&
+        frame.event.sessionId === "board:agent:main",
+      "agent_delegate tool.start",
+    );
+    assert.equal(handoff.event.args.to, "nova");
+    const talk = await inbox.next((frame) => frame.type === "office.talk", "office.talk frame");
+    assert.equal(talk.from, "main");
+    assert.equal(talk.to, nova.id);
+    assert.match(talk.text, /make the image/);
+    const handed = await inbox.next(
+      (frame) =>
+        frame.type === "event" &&
+        frame.event.type === "tool.result" &&
+        frame.event.name === "agent_delegate" &&
+        frame.event.ok === true,
+      "agent_delegate tool.result",
+    );
+    assert.match(handed.event.preview, /Nova/);
+    assert.match(handed.event.preview, /IMAGE-OK/);
+    const parentAnswer = await inbox.next(
+      (frame) =>
+        frame.type === "event" &&
+        frame.event.type === "assistant.message" &&
+        frame.event.sessionId === "board:agent:main",
+      "main's answer after the handoff",
+    );
+    assert.equal(parentAnswer.event.text, "Handed off and got the result.");
+    const novaSession = await store.get(`board:agent:${nova.id}`);
+    assert.ok(
+      novaSession.messages.some((message) => message.role === "user" && message.content === "make the image"),
+      "the colleague ran the handed task in its own session",
+    );
+    const seats = await gateway.agents.list();
+    assert.ok(
+      Math.abs(seats.find((entry) => entry.id === "main").y - 51) < 0.001,
+      "both characters walked to the same spot for the handoff",
+    );
+    check("agent_delegate: A hands work to B, B runs its own turn, A continues with the result");
+
+    // 12c. A character cannot hand work to itself or loop a chain.
+    socket.send(
+      JSON.stringify({
+        type: "chat.send",
+        sessionId: "board:agent:main",
+        agentId: "main",
+        text: "loop-check",
+      }),
+    );
+    const refused = await inbox.next(
+      (frame) =>
+        frame.type === "event" &&
+        frame.event.type === "tool.result" &&
+        frame.event.name === "agent_delegate" &&
+        frame.event.ok === false,
+      "refused self-handoff",
+    );
+    assert.match(refused.event.preview, /yourself/);
+    check("agent_delegate: refusing to hand work back to yourself");
 
     socket.send(JSON.stringify({ type: "agent.delete", id: nova.id }));
     const afterDelete = await inbox.next(
@@ -483,6 +617,39 @@ async function main() {
     assert.equal(status.line.replied, 1);
     assert.equal(status.line.rejected, 1);
     check("/api/status reports LINE as verified, replied and rejected counts");
+
+    // 14. An approval request reaches the chat, and the chat can decide it.
+    const relay = new ApprovalRelay(approvals, approvalService, createLogger("approvals"));
+    relay.addSender("line:Uallowed", (text) => line.pushText("Uallowed", text));
+    relay.start();
+    const lineApproval = approvals.request({
+      action: "install",
+      name: "remote-chat",
+      sessionId: "line:Uallowed",
+    });
+    await relay.idle();
+    assert.equal(lineReplies.length, 2, "the allowed LINE chat gets one push notification");
+    assert.equal(lineReplies[1].path, "/v2/bot/message/push");
+    assert.equal(lineReplies[1].body.to, "Uallowed");
+    const shortId = lineApproval.id.slice(0, 8);
+    assert.match(lineReplies[1].body.messages[0].text, /remote-chat/);
+    assert.match(lineReplies[1].body.messages[0].text, new RegExp(`approve ${shortId}`));
+    check("a new approval request is pushed to the allowed LINE chat");
+
+    const callsBeforeApproval = modelCalls;
+    const listBody = lineEvent("evt-3", "approvals");
+    assert.equal((await lineWebhook(listBody, lineSignature(listBody))).status, 200);
+    await waitFor(() => lineReplies.length === 3, "the approval list reply");
+    assert.match(lineReplies[2].body.messages[0].text, /remote-chat/);
+    check("LINE: `approvals` lists the pending request");
+
+    const rejectBody = lineEvent("evt-4", `reject ${shortId}`);
+    assert.equal((await lineWebhook(rejectBody, lineSignature(rejectBody))).status, 200);
+    await waitFor(() => lineReplies.length === 4, "the rejection reply");
+    assert.match(lineReplies[3].body.messages[0].text, /ปฏิเสธ/);
+    assert.equal(approvals.list().length, 0, "the chat decision clears the queue");
+    assert.equal(modelCalls, callsBeforeApproval, "a chat command must not run a model turn");
+    check("LINE: `reject <id>` resolves the request without a model turn");
   } finally {
     await gateway.stop();
     await new Promise((resolve) => stub.close(resolve));

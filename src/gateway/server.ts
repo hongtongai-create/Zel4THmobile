@@ -5,7 +5,7 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AgentHarness } from "../agent.js";
-import { AgentRegistry } from "../agents.js";
+import { AgentRegistry, type AgentProfile } from "../agents.js";
 import type { LineChannel } from "../channels/line.js";
 import type { Config } from "../config.js";
 import type { ApprovalQueue } from "../extensions/approvals.js";
@@ -127,6 +127,39 @@ export function createGateway(options: GatewayOptions) {
   async function broadcastAgents(): Promise<void> {
     broadcast(await agentsState());
   }
+
+  /**
+   * Two characters walk to a shared spot when one hands work to the other, so the
+   * board shows the handoff instead of only a tool chip.
+   */
+  async function meet(from: AgentProfile, to: AgentProfile, task: string): Promise<void> {
+    const midX = (from.x + to.x) / 2;
+    const midY = (from.y + to.y) / 2;
+    // Sequential: both writes persist to the same agents.json.
+    await agents.update(from.id, { x: midX - 6, y: midY });
+    await agents.update(to.id, { x: midX + 6, y: midY });
+    await broadcastAgents();
+    broadcast({
+      type: "office.talk",
+      from: from.id,
+      to: to.id,
+      fromName: from.name,
+      toName: to.name,
+      text: task.replace(/\s+/g, " ").trim().slice(0, 80),
+      at: Date.now(),
+    });
+  }
+
+  // Delegated turns are broadcast like any other turn, under their own session,
+  // so the receiving character's bubble and tool chips update live.
+  harness.setDelegationHooks({
+    onEvent: (event) => broadcast({ type: "event", event }),
+    onMeet: (from, to, task) => {
+      void meet(from, to, task).catch((error: Error) =>
+        log.warn(`could not stage the handoff in the office: ${error.message}`),
+      );
+    },
+  });
 
   function onAgentEvent(socket: WebSocket | null): (event: AgentEvent) => void {
     return (event) => {

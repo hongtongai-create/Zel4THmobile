@@ -882,6 +882,8 @@ body[data-view="office"] .office {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  /* Walking to a colleague when work is handed over; dragging must feel direct. */
+  transition: left 0.55s ease, top 0.55s ease;
 }
 
 .actor.dragging {
