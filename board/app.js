@@ -476,6 +476,8 @@ function actorEl(id) {
   return [...els.sceneFrame.querySelectorAll(".actor")].find((node) => node.dataset.id === id) ?? null;
 }
 
+const LEGACY_SPRITES = ["bolt", "claw", "lab", "night", "nova", "studio"];
+
 function buildActor(agent) {
   const actor = el("div", "actor");
   actor.dataset.id = agent.id;
@@ -493,7 +495,12 @@ function buildActor(agent) {
   const asset = (state.office.characters ?? []).find(
     (entry) => entry.id === agent.sprite || entry.image === agent.sprite,
   );
-  const image = asset?.image ?? (agent.sprite && agent.sprite.startsWith("/") ? agent.sprite : null);
+  // Profiles saved before the sprite sheets still point at the old flat
+  // characters, which live in assets/legacy/ now.
+  const legacyImage =
+    !asset && LEGACY_SPRITES.includes(agent.sprite) ? `/assets/legacy/${agent.sprite}.svg` : null;
+  const image =
+    asset?.image ?? (agent.sprite && agent.sprite.startsWith("/") ? agent.sprite : null) ?? legacyImage;
   if (image) {
     const sprite = el("div", "actor-sprite");
     sprite.style.backgroundImage = `url("${image}")`;

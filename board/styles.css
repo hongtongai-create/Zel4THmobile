@@ -961,7 +961,8 @@ body[data-view="office"] .office {
 }
 
 .actor-name {
-  max-width: 132px;
+  /* Never wider than the character itself, so neighbours do not overlap. */
+  max-width: var(--actor-size);
   padding: 2px 9px;
   border-radius: 999px;
   background: #0a0f15cc;
@@ -975,7 +976,7 @@ body[data-view="office"] .office {
 
 .actor-bubble {
   display: none;
-  max-width: 150px;
+  max-width: calc(var(--actor-size) * 1.15);
   padding: 3px 9px;
   border-radius: 10px;
   background: #0b1219f2;

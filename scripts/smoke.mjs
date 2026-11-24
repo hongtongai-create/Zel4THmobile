@@ -488,9 +488,15 @@ async function main() {
       "the colleague ran the handed task in its own session",
     );
     const seats = await gateway.agents.list();
+    const senderSeat = seats.find((entry) => entry.id === "main");
+    const receiverSeat = seats.find((entry) => entry.id === nova.id);
     assert.ok(
-      Math.abs(seats.find((entry) => entry.id === "main").y - 51) < 0.001,
-      "both characters walked to the same spot for the handoff",
+      Math.abs(senderSeat.y - 51) <= 4 && Math.abs(receiverSeat.y - 51) <= 4,
+      "both characters walked to the meeting point for the handoff",
+    );
+    assert.ok(
+      Math.abs(senderSeat.x - receiverSeat.x) > 20,
+      "the two characters stand far enough apart that their name plates and bubbles do not overlap",
     );
     check("agent_delegate: A hands work to B, B runs its own turn, A continues with the result");
 

@@ -14,6 +14,12 @@ import type { Logger } from "../log.js";
 import { loadOfficeAssets, type OfficeAssets } from "../office.js";
 import type { AgentEvent, SessionChannel } from "../types.js";
 
+/** Where two characters stand when work is handed over (percent of the scene frame). */
+const MEET_GAP = 14;
+const MEET_STAGGER = 3;
+
+const clampPct = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -135,9 +141,13 @@ export function createGateway(options: GatewayOptions) {
   async function meet(from: AgentProfile, to: AgentProfile, task: string): Promise<void> {
     const midX = (from.x + to.x) / 2;
     const midY = (from.y + to.y) / 2;
+    // 28% of the frame apart with a slight stagger: far enough that two name
+    // plates and speech bubbles sit side by side instead of stacking.
+    const leftX = clampPct(midX - MEET_GAP, 2, 96);
+    const rightX = clampPct(midX + MEET_GAP, 2, 96);
     // Sequential: both writes persist to the same agents.json.
-    await agents.update(from.id, { x: midX - 6, y: midY });
-    await agents.update(to.id, { x: midX + 6, y: midY });
+    await agents.update(from.id, { x: leftX, y: clampPct(midY - MEET_STAGGER, 8, 94) });
+    await agents.update(to.id, { x: rightX, y: clampPct(midY + MEET_STAGGER, 8, 94) });
     await broadcastAgents();
     broadcast({
       type: "office.talk",
