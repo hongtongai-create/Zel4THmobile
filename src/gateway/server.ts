@@ -9,6 +9,7 @@ import { AgentRegistry } from "../agents.js";
 import type { LineChannel } from "../channels/line.js";
 import type { Config } from "../config.js";
 import type { ApprovalQueue } from "../extensions/approvals.js";
+import { ApprovalService } from "../extensions/approval-service.js";
 import type { Logger } from "../log.js";
 import { loadOfficeAssets, type OfficeAssets } from "../office.js";
 import type { AgentEvent, SessionChannel } from "../types.js";
@@ -55,6 +56,8 @@ type GatewayOptions = {
   log: Logger;
   agents?: AgentRegistry;
   approvals?: ApprovalQueue;
+  /** Shared with the chat channels so every surface sees the same decisions. */
+  approvalService?: ApprovalService;
   line?: LineChannel;
 };
 
@@ -79,6 +82,9 @@ async function readBody(req: import("node:http").IncomingMessage): Promise<Buffe
 export function createGateway(options: GatewayOptions) {
   const { config, harness, log, approvals, line } = options;
   const agents = options.agents ?? new AgentRegistry(config.dataDir);
+  const approvalService =
+    options.approvalService ??
+    (approvals ? new ApprovalService(approvals, () => harness.extensions ?? null) : null);
 
   const clients = new Set<WebSocket>();
   const wss = new WebSocketServer({ noServer: true });
@@ -220,35 +226,24 @@ export function createGateway(options: GatewayOptions) {
 
         case "approval.approve": {
           const id = typeof msg.id === "string" ? msg.id : "";
-          const request = approvals?.approve(id) ?? null;
-          if (!request) {
-            send(socket, { type: "approval.result", id, ok: false, message: "ไม่พบคำขอที่รออนุมัติ (อาจหมดอายุแล้ว)" });
-            return;
-          }
-          const extensions = harness.extensions;
-          if (!extensions) {
+          if (!approvalService) {
             send(socket, { type: "approval.result", id, ok: false, message: "extension system ไม่พร้อมใช้งาน" });
             return;
           }
-          try {
-            const message = await extensions.applyApproved(request);
-            send(socket, { type: "approval.result", id, ok: true, message });
-            await broadcastAgents();
-          } catch (error) {
-            send(socket, { type: "approval.result", id, ok: false, message: (error as Error).message });
-          }
+          const outcome = await approvalService.approve(id);
+          if (outcome.ok) await broadcastAgents();
+          send(socket, { type: "approval.result", id: outcome.id ?? id, ok: outcome.ok, message: outcome.message });
           return;
         }
 
         case "approval.reject": {
           const id = typeof msg.id === "string" ? msg.id : "";
-          const request = approvals?.reject(id) ?? null;
-          send(socket, {
-            type: "approval.result",
-            id,
-            ok: Boolean(request),
-            message: request ? "ปฏิเสธคำขอแล้ว" : "ไม่พบคำขอที่รออนุมัติ",
-          });
+          const outcome = approvalService?.reject(id) ?? {
+            ok: false,
+            id: null,
+            message: "ระบบอนุมัติไม่พร้อมใช้งาน",
+          };
+          send(socket, { type: "approval.result", id: outcome.id ?? id, ok: outcome.ok, message: outcome.message });
           return;
         }
 

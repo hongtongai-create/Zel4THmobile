@@ -124,6 +124,9 @@ TELEGRAM_ALLOWED_CHAT_IDS=123456789     # ว่าง = ไม่มีใค�
 ว่างไว้แล้วจะถูกปฏิเสธทุก chat — ต้องใส่ chat id เสมอ บอทจะส่ง `typing` ระหว่างที่ agent ทำงาน
 และตอบกลับเป็น plain text (ตัดให้พอดี 4000 ตัวอักษรต่อข้อความ)
 
+คำสั่งที่มีให้: `/approvals` (ดูคำขออนุมัติ extension ที่รออยู่), `/approve <id>`, `/reject <id>`,
+`/model`, `/models`, `/reset`, `/status` — คำขออนุมัติใหม่จะถูกส่งเข้ามาที่ chat นี้เองโดยไม่ต้องเปิดบอร์ด
+
 ## LINE
 
 เชื่อม LINE Official Account (Messaging API) ให้คุยกับ agent/ออฟฟิศตัวเดียวกับ Telegram —
@@ -154,6 +157,8 @@ LINE_AGENT_ID=main                          # agent ที่ตอบ (ไม�
 - ผู้ส่งที่ไม่อยู่ใน `LINE_ALLOWED_SOURCE_IDS` ถูกเมินและ log ไว้ (default deny)
 - session แยกเป็น `line:<userId|groupId|roomId>` ไม่ปนกับ Telegram/บอร์ด
 - ส่งคำตอบด้วย reply token ก่อน ถ้า token หมดอายุจะ fallback ไป push API
+- คำขออนุมัติ extension ถูก push เข้า source ที่อนุญาต และตอบกลับได้ในแชทด้วย
+  `approvals`, `approve <id>`, `reject <id>` (ไม่กิน model turn)
 
 สถานะจริงดูได้ที่ `GET /api/status` → `line: { configured, webhookVerified, events, replied, duplicates, rejected, lastEventAt }`
 ค่า ENV ที่มีอยู่ไม่ถือว่า “ผ่าน” — `webhookVerified` จะเป็น true หลังมี request ที่ signature ถูกต้องจริงเท่านั้น
@@ -307,6 +312,10 @@ import แล้ว throw, export ไม่ตรงสัญญา `{ name, des
 - **การเปลี่ยน extension ต้องอนุมัติ**: `EXTENSIONS_AGENT_WRITES=confirm` (ค่าเริ่มต้น) ทำให้
   `install`/`remove`/`reload` จาก agent ถูกพักไว้ในคิว แล้วขึ้นปุ่ม **รออนุมัติ** บนบอร์ดให้กดอนุมัติ/ปฏิเสธ
   (`allow` = ทำทันที, `deny` = ห้ามทั้งหมด) คำขออยู่ในหน่วยความจำและหมดอายุใน 10 นาที
+- **อนุมัติได้จากแชท**: คำขอใหม่ถูก push เข้า Telegram chat ที่อยู่ใน `TELEGRAM_ALLOWED_CHAT_IDS`
+  และ LINE source ที่อยู่ใน `LINE_ALLOWED_SOURCE_IDS` ทุกช่อง พร้อม id ย่อ 8 ตัว
+  ตอบ `approvals` เพื่อดูคิว, `approve <id>` เพื่ออนุมัติ, `reject <id>` เพื่อปฏิเสธ
+  (ใช้ `/approve` หรือคำไทย `อนุมัติ`/`ปฏิเสธ` ก็ได้) ทุกช่องใช้คิวเดียวกัน — อนุมัติที่ไหนก็หายจากที่อื่น
 
 การติดตั้งตรวจชื่อ (`[a-z0-9._-]`), ปฏิเสธ path ที่มี `..` หรือ absolute, จำกัดขนาดไฟล์ 512 KB
 และ 40 ไฟล์ต่อ entry — registry ยังเป็นโค้ดที่รันได้ (plugin) จึงควรใช้ registry ที่คุณควบคุมเอง

@@ -8,6 +8,8 @@ import { LineChannel } from "./channels/line.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { loadConfig, loadDotEnv } from "./config.js";
 import { ApprovalQueue } from "./extensions/approvals.js";
+import { ApprovalRelay } from "./extensions/approval-relay.js";
+import { ApprovalService } from "./extensions/approval-service.js";
 import { ExtensionManager } from "./extensions/index.js";
 import { HubClient, describeEntry } from "./extensions/hub.js";
 import { createGateway } from "./gateway/server.js";
@@ -144,8 +146,22 @@ async function runGateway(): Promise<void> {
   }
   log.info(`tools: ${tools.names().join(", ") || "none"}`);
 
-  const line = config.line ? new LineChannel(config.line, harness, createLogger("line"), agents) : null;
-  const gateway = createGateway({ config, harness, log: createLogger("gateway"), agents, approvals, line: line ?? undefined });
+  // One service decides approvals from every surface: board, Telegram and LINE.
+  const approvalsService = new ApprovalService(approvals, () => harness.extensions ?? null);
+  const relay = new ApprovalRelay(approvals, approvalsService, createLogger("approvals"));
+
+  const line = config.line
+    ? new LineChannel(config.line, harness, createLogger("line"), agents, { approvals: approvalsService })
+    : null;
+  const gateway = createGateway({
+    config,
+    harness,
+    log: createLogger("gateway"),
+    agents,
+    approvals,
+    approvalService: approvalsService,
+    line: line ?? undefined,
+  });
   const port = await gateway.start();
 
   console.log("");
@@ -159,13 +175,23 @@ async function runGateway(): Promise<void> {
 
   let telegram: TelegramChannel | null = null;
   if (config.telegram) {
-    telegram = new TelegramChannel(config.telegram, harness, createLogger("telegram"));
+    telegram = new TelegramChannel(config.telegram, harness, createLogger("telegram"), {
+      approvals: approvalsService,
+    });
     telegram.start();
+    const bot = telegram;
+    for (const chatId of config.telegram.allowedChatIds) {
+      relay.addSender(`telegram:${chatId}`, (text) => bot.sendText(chatId, text));
+    }
   } else {
     log.warn("telegram disabled - set TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_CHAT_IDS");
   }
 
-  if (config.line) {
+  if (line && config.line) {
+    const channel = line;
+    for (const sourceId of config.line.allowedSourceIds) {
+      relay.addSender(`line:${sourceId}`, (text) => channel.pushText(sourceId, text));
+    }
     log.info(
       `line channel ready at ${config.line.webhookPath} (allowed sources: ${config.line.allowedSourceIds.join(", ") || "none - set LINE_ALLOWED_SOURCE_IDS"})`,
     );
@@ -173,8 +199,15 @@ async function runGateway(): Promise<void> {
     log.warn("line disabled - set LINE_CHANNEL_SECRET and LINE_CHANNEL_ACCESS_TOKEN");
   }
 
+  relay.start();
+  const notified = relay;
+  if (config.telegram || config.line) {
+    log.info("approval requests are pushed to Telegram and LINE allowed chats");
+  }
+
   const shutdown = async (signal: string) => {
     log.info(`${signal} received, shutting down`);
+    notified.stop();
     await telegram?.stop();
     await gateway.stop();
     await extensions?.close();

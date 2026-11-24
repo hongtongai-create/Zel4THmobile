@@ -60,9 +60,10 @@ export function createExtensionsTool(manager: ExtensionManager, options: Extensi
             agentId: ctx?.agentId ?? null,
           });
           const label = name ? `${action} "${name}"` : action;
+          const shortId = request.id.slice(0, 8);
           return [
             `Approval required: ${label} was not executed.`,
-            `Request ${request.id} is waiting for the operator (board -> รออนุมัติ).`,
+            `Request ${shortId} is waiting for the operator (board -> รออนุมัติ, or \`approve ${shortId}\` in Telegram/LINE).`,
             "Nothing was installed, removed or reloaded yet. Tell the operator what should be approved.",
           ].join("\n");
         }

@@ -136,6 +136,8 @@ async function main() {
   const { ToolRegistry, createToolRegistry } = await import("../dist/tools/index.js");
   const { createExtensionsTool } = await import("../dist/tools/extensions.js");
   const { ApprovalQueue } = await import("../dist/extensions/approvals.js");
+  const { ApprovalService, parseApprovalCommand } = await import("../dist/extensions/approval-service.js");
+  const { ApprovalRelay } = await import("../dist/extensions/approval-relay.js");
   const { AgentHarness } = await import("../dist/agent.js");
   const { ModelCatalog } = await import("../dist/models.js");
   const { SessionStore } = await import("../dist/store.js");
@@ -307,6 +309,36 @@ async function main() {
     assert.match(applied, /note-skill/);
     assert.equal(approvals.list().length, 0);
     check("extension install is queued until the operator approves");
+
+    // Chat surfaces share that queue: short ids, a list, a rejection.
+    const service = new ApprovalService(approvals, () => manager);
+    const sent = [];
+    const relay = new ApprovalRelay(approvals, service, log);
+    relay.addSender("test-chat", async (text) => {
+      sent.push(text);
+    });
+    relay.start();
+    assert.deepEqual(parseApprovalCommand("/approvals"), { kind: "list" });
+    assert.equal(parseApprovalCommand("approve the plan"), null, "a sentence is not a command");
+    const chatQueued = await tools.invoke(
+      "extensions",
+      JSON.stringify({ action: "install", name: "shout-plugin" }),
+      { sessionId: "line:Uchat", log },
+    );
+    assert.match(chatQueued.output, /Approval required/);
+    await relay.idle();
+    assert.equal(sent.length, 1, "the chat is told once about a new request");
+    assert.match(sent[0], /shout-plugin/);
+    assert.equal(approvals.list().length, 1);
+    assert.match(service.formatList(), /shout-plugin/);
+    const shortId = approvals.list()[0].id.slice(0, 8);
+    assert.deepEqual(parseApprovalCommand(`reject ${shortId}`), { kind: "reject", id: shortId });
+    const chatRejected = service.reject(shortId);
+    assert.equal(chatRejected.ok, true, chatRejected.message);
+    assert.equal(service.list().length, 0);
+    await relay.idle();
+    assert.equal(sent.length, 1, "a resolved request is not announced again");
+    check("chat approvals: notified once, listed, rejected by short id");
 
     tools.register(createExtensionsTool(manager, { approvals, writes: "deny" }));
     const blocked = await tools.invoke("extensions", JSON.stringify({ action: "reload" }), {

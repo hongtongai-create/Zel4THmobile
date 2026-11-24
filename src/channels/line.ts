@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AgentHarness } from "../agent.js";
 import type { AgentRegistry, AgentProfile } from "../agents.js";
 import type { LineConfig } from "../config.js";
+import { parseApprovalCommand, type ApprovalCommand, type ApprovalService } from "../extensions/approval-service.js";
 import type { Logger } from "../log.js";
 
 type LineEvent = {
@@ -22,6 +23,11 @@ type LineMessage = { type: "text"; text: string };
 
 const MAX_MESSAGES = 5;
 const MAX_TEXT = 4900;
+
+export type LineChannelOptions = {
+  /** When set, an allowed source can list, approve and reject extension requests. */
+  approvals?: ApprovalService;
+};
 const SEEN_LIMIT = 500;
 
 /** LINE signs the raw body with HMAC-SHA256 and base64-encodes the digest. */
@@ -70,12 +76,17 @@ export class LineChannel {
   private failures = 0;
   private lastEventAt: string | null = null;
 
+  private readonly approvals: ApprovalService | null;
+
   constructor(
     private readonly cfg: LineConfig,
     private readonly harness: AgentHarness,
     private readonly log: Logger,
     private readonly agents?: AgentRegistry,
-  ) {}
+    options: LineChannelOptions = {},
+  ) {
+    this.approvals = options.approvals ?? null;
+  }
 
   get webhookPath(): string {
     return this.cfg.webhookPath;
@@ -153,6 +164,14 @@ export class LineChannel {
 
       this.events += 1;
       this.lastEventAt = new Date().toISOString();
+      const approvalCommand = this.approvals ? parseApprovalCommand(text) : null;
+      if (approvalCommand) {
+        void this.respondApproval(sourceId, event.replyToken, approvalCommand).catch((error: Error) => {
+          this.failures += 1;
+          this.log.error(`line approval command failed for ${sourceId}: ${error.message}`);
+        });
+        continue;
+      }
       void this.respond(sourceId, event.replyToken, text).catch((error: Error) => {
         this.failures += 1;
         this.log.error(`line turn failed for ${sourceId}: ${error.message}`);
@@ -172,17 +191,43 @@ export class LineChannel {
     return (await this.agents.get("main")) ?? (await this.agents.list())[0] ?? null;
   }
 
+  private async respondApproval(
+    sourceId: string,
+    replyToken: string | undefined,
+    command: ApprovalCommand,
+  ): Promise<void> {
+    const approvals = this.approvals;
+    if (!approvals) return;
+    let reply: string;
+    if (command.kind === "list") {
+      reply = approvals.formatList();
+    } else {
+      const outcome = command.kind === "approve" ? await approvals.approve(command.id) : approvals.reject(command.id);
+      reply = `${outcome.ok ? "✅" : "⚠️"} ${outcome.message}`;
+    }
+    await this.send(replyToken, sourceId, reply);
+    this.replied += 1;
+  }
+
   private async respond(sourceId: string, replyToken: string | undefined, text: string): Promise<void> {
     const agent = await this.agentFor();
     // A LINE chat id is never mixed with a Telegram or board conversation.
     const sessionId = `line:${sourceId}`;
     const result = await this.harness.run(sessionId, "line", text, () => {}, agent);
     const reply = result.text || "(the agent finished without a reply)";
+    await this.send(replyToken, sourceId, reply);
+    this.replied += 1;
+  }
 
+  /** Proactive push for approval notifications (no reply token involved). */
+  async pushText(to: string, text: string): Promise<void> {
+    await this.api("push", { to, messages: this.messages(text) });
+  }
+
+  private async send(replyToken: string | undefined, sourceId: string, reply: string): Promise<void> {
     if (replyToken) {
       try {
         await this.api("reply", { replyToken, messages: this.messages(reply) });
-        this.replied += 1;
         return;
       } catch (error) {
         // Reply tokens expire; pushing is the documented fallback.
@@ -191,7 +236,6 @@ export class LineChannel {
     }
 
     await this.api("push", { to: sourceId, messages: this.messages(reply) });
-    this.replied += 1;
   }
 
   private messages(text: string): LineMessage[] {

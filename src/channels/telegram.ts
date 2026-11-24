@@ -1,5 +1,6 @@
 import type { AgentHarness } from "../agent.js";
 import type { TelegramConfig } from "../config.js";
+import { parseApprovalCommand, type ApprovalCommand, type ApprovalService } from "../extensions/approval-service.js";
 import type { Logger } from "../log.js";
 
 type TelegramUpdate = {
@@ -27,18 +28,30 @@ function chunk(text: string, size = MAX_TELEGRAM_LENGTH): string[] {
   return parts;
 }
 
+export type TelegramChannelOptions = {
+  /** When set, an allowed chat can list, approve and reject extension requests. */
+  approvals?: ApprovalService;
+};
+
 export class TelegramChannel {
   private readonly cfg: TelegramConfig;
   private readonly harness: AgentHarness;
   private readonly log: Logger;
+  private readonly approvals: ApprovalService | null;
   private running = false;
   private offset = 0;
   private loop: Promise<void> | null = null;
 
-  constructor(cfg: TelegramConfig, harness: AgentHarness, log: Logger) {
+  constructor(
+    cfg: TelegramConfig,
+    harness: AgentHarness,
+    log: Logger,
+    options: TelegramChannelOptions = {},
+  ) {
     this.cfg = cfg;
     this.harness = harness;
     this.log = log;
+    this.approvals = options.approvals ?? null;
   }
 
   private async api<T>(method: string, body: Record<string, unknown>): Promise<T> {
@@ -71,8 +84,23 @@ export class TelegramChannel {
     }
   }
 
+  private async runApproval(command: ApprovalCommand): Promise<string> {
+    const approvals = this.approvals;
+    if (!approvals) return "ระบบอนุมัติไม่พร้อมใช้งาน";
+    if (command.kind === "list") return approvals.formatList();
+    const outcome = command.kind === "approve" ? await approvals.approve(command.id) : approvals.reject(command.id);
+    return `${outcome.ok ? "✅" : "⚠️"} ${outcome.message}`;
+  }
+
   private async handleText(chatId: string, text: string): Promise<void> {
     const sessionId = `telegram:${chatId}`;
+
+    // Approval commands belong to the operator, not the model.
+    const approvalCommand = this.approvals ? parseApprovalCommand(text) : null;
+    if (approvalCommand) {
+      await this.sendText(chatId, await this.runApproval(approvalCommand));
+      return;
+    }
 
     if (!text.startsWith("/")) {
       const typing = setInterval(() => {
@@ -102,6 +130,8 @@ export class TelegramChannel {
           [
             "Agent ready.",
             "",
+            "/approvals - extension changes waiting for your approval",
+            "/approve <id> - approve one, /reject <id> - reject one",
             "/model - show the current model",
             "/model <provider:model> - switch model",
             "/models - list available models",
