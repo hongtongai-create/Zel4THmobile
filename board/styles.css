@@ -882,14 +882,28 @@ body[data-view="office"] .office {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  /* Walking to a colleague when work is handed over; dragging must feel direct. */
-  transition: left 0.55s ease, top 0.55s ease;
+  /* Walking is animated in app.js so it still plays under reduced motion. */
+  will-change: left, top;
 }
 
 .actor.dragging {
   cursor: grabbing;
   z-index: 6;
   transition: none;
+}
+
+.actor.walking .actor-avatar {
+  animation: walk-bob 0.42s ease-in-out infinite;
+}
+
+@keyframes walk-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
 }
 
 .actor-avatar {

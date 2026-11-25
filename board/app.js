@@ -457,13 +457,11 @@ function applyScene(scene) {
 }
 
 function renderOffice() {
-  els.sceneFrame.querySelectorAll(".actor").forEach((node) => node.remove());
-
   const scenes = state.office.scenes ?? [];
   const scene = scenes.find((entry) => entry.id === state.scene) ?? scenes[0] ?? null;
   applyScene(scene);
 
-  for (const agent of state.agents) els.sceneFrame.append(buildActor(agent));
+  syncActors(state.agents);
 
   els.stageEmpty.hidden = state.agents.length > 0;
   renderScenePicker();
@@ -481,6 +479,8 @@ const LEGACY_SPRITES = ["bolt", "claw", "lab", "night", "nova", "studio"];
 function buildActor(agent) {
   const actor = el("div", "actor");
   actor.dataset.id = agent.id;
+  actor.dataset.sprite = agent.sprite ?? "";
+  actor.__target = { x: agent.x, y: agent.y };
   actor.setAttribute("role", "button");
   actor.setAttribute("tabindex", "0");
   actor.setAttribute("aria-label", `${agent.name} ตั้งค่า`);
@@ -522,6 +522,7 @@ function buildActor(agent) {
   let drag = null;
   actor.addEventListener("pointerdown", (event) => {
     if (event.button != null && event.button !== 0) return;
+    stopWalk(actor);
     drag = { x: event.clientX, y: event.clientY, moved: false };
     actor.classList.add("dragging");
     if (actor.setPointerCapture) actor.setPointerCapture(event.pointerId);
@@ -570,6 +571,120 @@ function buildActor(agent) {
   });
 
   return actor;
+}
+
+/**
+ * Reuse the actor nodes between state broadcasts. Rebuilding them started every
+ * character at its new spot, so a handoff looked like teleporting instead of
+ * walking; keeping the node lets the CSS left/top transition play.
+ */
+function syncActors(list) {
+  const frame = els.sceneFrame;
+  const existing = new Map(
+    [...frame.querySelectorAll(".actor")].map((node) => [node.dataset.id, node]),
+  );
+
+  for (const agent of list) {
+    const current = existing.get(agent.id);
+    if (!current) {
+      frame.append(buildActor(agent));
+      continue;
+    }
+    existing.delete(agent.id);
+    if (current.dataset.sprite !== (agent.sprite ?? "")) {
+      current.replaceWith(buildActor(agent));
+      continue;
+    }
+    const spot = walkTarget(current, agent, list);
+    current.style.setProperty("--actor-color", agent.color || "#6ee7b7");
+    current.classList.toggle("focused", agent.id === state.agentId);
+    current.setAttribute("aria-label", `${agent.name} ตั้งค่า`);
+    const name = current.querySelector(".actor-name");
+    if (name && name.textContent !== agent.name) name.textContent = agent.name;
+    walkActor(current, spot.x, spot.y);
+  }
+
+  for (const node of existing.values()) node.remove();
+}
+
+const walks = new WeakMap();
+
+/** Cancel a walk in progress so dragging stays direct. */
+function stopWalk(actor) {
+  const walk = walks.get(actor);
+  if (!walk) return;
+  if (walk.frame) cancelAnimationFrame(walk.frame);
+  walks.delete(actor);
+  actor.classList.remove("walking");
+}
+
+/**
+ * Characters walk to their new spot instead of teleporting. Driven in JS rather
+ * than a CSS transition, so it still moves where the OS asks for reduced motion.
+ */
+function walkActor(actor, x, y) {
+  let walk = walks.get(actor);
+  if (!walk) {
+    walk = {
+      x: Number.parseFloat(actor.style.left) || x,
+      y: Number.parseFloat(actor.style.top) || y,
+      frame: 0,
+    };
+    walks.set(actor, walk);
+  }
+  if (walk.frame) cancelAnimationFrame(walk.frame);
+  const from = { x: walk.x, y: walk.y };
+  const distance = Math.hypot(x - from.x, y - from.y);
+  if (distance < 0.4) {
+    walk.frame = 0;
+    walk.x = x;
+    walk.y = y;
+    actor.style.left = `${x}%`;
+    actor.style.top = `${y}%`;
+    actor.classList.remove("walking");
+    return;
+  }
+  // Long walks take longer, but never crawl.
+  const duration = clamp(340 + distance * 32, 340, 1400);
+  const started = performance.now();
+  actor.classList.add("walking");
+  const step = (now) => {
+    const t = Math.min(1, (now - started) / duration);
+    const eased = t < 0.5 ? 2 * t * t : 1 - (1 - t) * (1 - t) * 2;
+    walk.x = from.x + (x - from.x) * eased;
+    walk.y = from.y + (y - from.y) * eased;
+    actor.style.left = `${walk.x}%`;
+    actor.style.top = `${walk.y}%`;
+    if (t < 1) {
+      walk.frame = requestAnimationFrame(step);
+      return;
+    }
+    walk.frame = 0;
+    actor.classList.remove("walking");
+  };
+  walk.frame = requestAnimationFrame(step);
+}
+
+/**
+ * A meeting pair can land on a third colleague standing nearby, so a character
+ * that is moving dodges until its spot is clear of everyone else.
+ */
+function walkTarget(node, agent, list) {
+  const previous = node.__target;
+  if (previous && previous.x === agent.x && previous.y === agent.y) return previous;
+  let { x, y } = agent;
+  const others = list.filter((entry) => entry.id !== agent.id);
+  for (let step = 0; step < 5; step += 1) {
+    const clash = others.some(
+      (entry) => Math.abs(entry.x - x) < 16 && Math.abs(entry.y - y) < 12,
+    );
+    if (!clash) break;
+    const offset = (Math.floor(step / 2) + 1) * 8;
+    y = clamp(y + (step % 2 === 0 ? offset : -offset), 8, 94);
+  }
+  const spot = { x, y };
+  node.__target = spot;
+  return spot;
 }
 
 function renderScenePicker() {
