@@ -781,28 +781,50 @@ body[data-view="office"] .model-chip {
   display: none;
 }
 
+/* Chat floats over the office instead of replacing it, so the characters stay
+   on screen while you talk to them. */
 .chat {
+  position: fixed;
+  z-index: 25;
   display: none;
-  flex: 1;
-  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
+  left: calc(var(--safe-left) + 10px);
+  right: calc(var(--safe-right) + 10px);
+  bottom: calc(var(--safe-bottom) + 10px);
+  height: 68vh;
+  height: 68dvh;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 24px 70px #000a;
 }
 
 body[data-view="chat"] .chat {
   display: flex;
 }
 
+@media (min-width: 720px) {
+  .chat {
+    left: auto;
+    right: calc(var(--safe-right) + 16px);
+    top: calc(var(--safe-top) + 72px);
+    bottom: calc(var(--safe-bottom) + 16px);
+    width: min(460px, 46vw);
+    height: auto;
+    border-radius: 20px;
+  }
+}
+
 /* ---------- office ---------- */
 
 .office {
-  display: none;
+  /* Always visible: chat is an overlay on top of the scene. */
+  display: flex;
   flex: 1;
   min-height: 0;
   flex-direction: column;
-}
-
-body[data-view="office"] .office {
-  display: flex;
 }
 
 .stage {
@@ -892,19 +914,7 @@ body[data-view="office"] .office {
   transition: none;
 }
 
-.actor.walking .actor-avatar {
-  animation: walk-bob 0.42s ease-in-out infinite;
-}
-
-@keyframes walk-bob {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
+/* The walking bob is applied inline by app.js so reduced motion cannot stop it. */
 
 .actor-avatar {
   width: var(--actor-size);

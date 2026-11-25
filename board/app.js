@@ -615,6 +615,7 @@ function stopWalk(actor) {
   if (!walk) return;
   if (walk.frame) cancelAnimationFrame(walk.frame);
   walks.delete(actor);
+  actor.style.transform = "";
   actor.classList.remove("walking");
 }
 
@@ -641,6 +642,7 @@ function walkActor(actor, x, y) {
     walk.y = y;
     actor.style.left = `${x}%`;
     actor.style.top = `${y}%`;
+    actor.style.transform = "";
     actor.classList.remove("walking");
     return;
   }
@@ -649,17 +651,23 @@ function walkActor(actor, x, y) {
   const started = performance.now();
   actor.classList.add("walking");
   const step = (now) => {
-    const t = Math.min(1, (now - started) / duration);
+    const elapsed = now - started;
+    const t = Math.min(1, elapsed / duration);
     const eased = t < 0.5 ? 2 * t * t : 1 - (1 - t) * (1 - t) * 2;
     walk.x = from.x + (x - from.x) * eased;
     walk.y = from.y + (y - from.y) * eased;
     actor.style.left = `${walk.x}%`;
     actor.style.top = `${walk.y}%`;
+    // A step rhythm on top of the slide, so it reads as walking and not gliding.
+    // Kept in JS because reduced-motion settings disable CSS keyframes.
+    const bob = Math.sin(elapsed / 90) * 3.5;
+    actor.style.transform = `translate(-50%, -50%) translateY(${bob.toFixed(2)}px)`;
     if (t < 1) {
       walk.frame = requestAnimationFrame(step);
       return;
     }
     walk.frame = 0;
+    actor.style.transform = "";
     actor.classList.remove("walking");
   };
   walk.frame = requestAnimationFrame(step);
