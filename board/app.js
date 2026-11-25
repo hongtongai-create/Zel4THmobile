@@ -29,6 +29,13 @@ const els = {
   viewTitle: document.getElementById("view-title"),
   viewMeta: document.getElementById("view-meta"),
   chatView: document.getElementById("chat-view"),
+  chatPortrait: document.getElementById("chat-portrait"),
+  chatSpeaker: document.getElementById("chat-speaker"),
+  talkView: document.getElementById("talk-view"),
+  talkPortrait: document.getElementById("talk-portrait"),
+  talkName: document.getElementById("talk-name"),
+  talkText: document.getElementById("talk-text"),
+  talkClose: document.getElementById("talk-close"),
   stage: document.getElementById("stage"),
   sceneLayer: document.getElementById("scene-layer"),
   sceneFrame: document.getElementById("scene-frame"),
@@ -198,6 +205,7 @@ function setChatMeta(meta) {
 function updateViewChrome() {
   document.body.dataset.view = state.view;
   els.viewToggle.textContent = state.view === "office" ? "แชท" : "ออฟฟิศ";
+  syncChatSpeaker();
 
   if (state.view === "office") {
     const scene = (state.office.scenes ?? []).find((entry) => entry.id === state.scene);
@@ -207,6 +215,17 @@ function updateViewChrome() {
   }
   els.viewTitle.textContent = state.chatTitle;
   els.viewMeta.textContent = state.chatMeta;
+}
+
+/** The chat plate names and pictures whoever a message would go to. */
+function syncChatSpeaker() {
+  const agent = findAgent(state.agentId);
+  const label = agent?.name ?? "clawgate";
+  if (els.chatSpeaker.textContent !== label) els.chatSpeaker.textContent = label;
+  const key = agent ? `${agent.id}:${agent.sprite ?? ""}` : "";
+  if (els.chatPortrait.dataset.agent === key) return;
+  els.chatPortrait.dataset.agent = key;
+  paintPortrait(els.chatPortrait, agent);
 }
 
 function setView(view) {
@@ -501,6 +520,40 @@ function actorEl(id) {
 
 const LEGACY_SPRITES = ["bolt", "claw", "lab", "night", "nova", "studio"];
 
+function characterAsset(agent) {
+  return (state.office.characters ?? []).find(
+    (entry) => entry.id === agent.sprite || entry.image === agent.sprite,
+  );
+}
+
+/** Resolve a profile's sprite to an image, including the pre-sheet characters. */
+function characterImage(agent) {
+  const asset = characterAsset(agent) ?? null;
+  // Profiles saved before the sprite sheets still point at the old flat
+  // characters, which live in assets/legacy/ now.
+  const legacy =
+    !asset && LEGACY_SPRITES.includes(agent.sprite) ? `/assets/legacy/${agent.sprite}.svg` : null;
+  const image =
+    asset?.image ?? (agent.sprite && agent.sprite.startsWith("/") ? agent.sprite : null) ?? legacy;
+  return { asset, image };
+}
+
+/** Paint a character's first sheet frame into a dialogue portrait slot. */
+function paintPortrait(node, agent) {
+  if (!node) return;
+  node.style.backgroundImage = "none";
+  node.textContent = "";
+  const { asset, image } = agent ? characterImage(agent) : { asset: null, image: null };
+  if (image) {
+    const frames = Math.max(1, asset?.frames ?? 1);
+    node.style.backgroundImage = `url("${image}")`;
+    node.style.backgroundSize = `${frames * 100}% 100%`;
+    node.style.backgroundPosition = "0% 50%";
+    return;
+  }
+  node.textContent = agent?.emoji || "🤖";
+}
+
 function buildActor(agent) {
   const actor = el("div", "actor");
   actor.dataset.id = agent.id;
@@ -517,15 +570,7 @@ function buildActor(agent) {
   const bubble = el("div", "actor-bubble");
   const avatar = el("div", "actor-avatar");
 
-  const asset = (state.office.characters ?? []).find(
-    (entry) => entry.id === agent.sprite || entry.image === agent.sprite,
-  );
-  // Profiles saved before the sprite sheets still point at the old flat
-  // characters, which live in assets/legacy/ now.
-  const legacyImage =
-    !asset && LEGACY_SPRITES.includes(agent.sprite) ? `/assets/legacy/${agent.sprite}.svg` : null;
-  const image =
-    asset?.image ?? (agent.sprite && agent.sprite.startsWith("/") ? agent.sprite : null) ?? legacyImage;
+  const { asset, image } = characterImage(agent);
   if (image) {
     const sprite = el("div", "actor-sprite");
     sprite.style.backgroundImage = `url("${image}")`;
@@ -755,6 +800,37 @@ function renderAgentList() {
     });
     els.agentList.append(li);
   }
+}
+
+/* ---------- office chatter ---------- */
+
+let talkTimer = 0;
+let talkSide = false;
+
+function hideTalk() {
+  clearTimeout(talkTimer);
+  talkTimer = 0;
+  els.talkView.hidden = true;
+}
+
+/**
+ * A line spoken between two characters, shown in the same plate as the chat but
+ * docked at the top, with the speaker's portrait alternating sides.
+ */
+function showTalk(frame) {
+  const from = findAgent(frame.from);
+  const to = findAgent(frame.to);
+  const fromName = from?.name ?? frame.fromName ?? frame.from ?? "agent";
+  const toName = to?.name ?? frame.toName ?? frame.to ?? "agent";
+  els.talkName.textContent = `${fromName} ⇢ ${toName}`;
+  els.talkText.textContent = frame.text ?? "";
+  paintPortrait(els.talkPortrait, from);
+  // First line on the left like a usual dialogue box, then alternate.
+  els.talkView.classList.toggle("side-right", talkSide);
+  talkSide = !talkSide;
+  els.talkView.hidden = false;
+  clearTimeout(talkTimer);
+  talkTimer = setTimeout(hideTalk, 9000);
 }
 
 /* ---------- activity bubbles ---------- */
@@ -1190,16 +1266,15 @@ function handleFrame(frame) {
       break;
 
     case "office.talk": {
-      // One character handed work to another: both say so while they walk together.
+      // One character handed work to another: the line is spoken in the plate at
+      // the top of the screen while both walk to meet.
       const from = findAgent(frame.from);
       const to = findAgent(frame.to);
-      setActivity(frame.from, {
-        busy: true,
-        text: `⇢ ${to?.name ?? frame.toName ?? frame.to}: ${frame.text ?? ""}`,
-      });
+      showTalk(frame);
+      setActivity(frame.from, { busy: true, text: `⇢ ${to?.name ?? frame.toName ?? frame.to}` });
       setActivity(frame.to, {
         busy: true,
-        text: `… รับงานจาก ${from?.name ?? frame.fromName ?? frame.from}`,
+        text: `… ${from?.name ?? frame.fromName ?? frame.from}`,
       });
       break;
     }
@@ -1348,6 +1423,7 @@ els.input.addEventListener("input", () => {
   els.input.style.height = `${Math.min(els.input.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
 });
 
+els.talkClose.addEventListener("click", hideTalk);
 els.menu.addEventListener("click", openDrawer);
 els.drawerClose.addEventListener("click", closeDrawer);
 els.drawerPin?.addEventListener("click", () => setDrawerPinned(!drawerIsPinned()));

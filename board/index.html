@@ -101,6 +101,15 @@
         </section>
 
         <section class="chat" id="chat-view" aria-label="Chat">
+          <div class="dlg-head">
+            <div class="dlg-portrait" id="chat-portrait" aria-hidden="true"></div>
+            <div class="dlg-titles">
+              <p class="dlg-kicker">แชทกับ</p>
+              <p class="dlg-name" id="chat-speaker">clawgate</p>
+            </div>
+            <span class="dlg-mark" aria-hidden="true">▼</span>
+          </div>
+
           <div class="messages" id="messages">
             <div class="empty" id="empty">
               <p class="empty-title">Connected to the gateway</p>
@@ -169,6 +178,17 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <!-- Agent-to-agent chatter sits in the same dialogue window, above the office. -->
+    <aside class="talk" id="talk-view" hidden aria-live="polite">
+      <div class="dlg-portrait" id="talk-portrait" aria-hidden="true"></div>
+      <div class="talk-body">
+        <p class="dlg-kicker">คุยกันในออฟฟิศ</p>
+        <p class="dlg-name" id="talk-name"></p>
+        <p class="talk-text" id="talk-text"></p>
+      </div>
+      <button class="talk-close" id="talk-close" type="button" aria-label="ปิด">✕</button>
+    </aside>
 
     <div class="overlay" id="login">
       <form class="card" id="login-form">
