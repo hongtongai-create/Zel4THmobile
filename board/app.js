@@ -93,6 +93,7 @@ const state = {
   targets: [],
   targetsReady: true,
   editingTarget: null,
+  activeTargetPlugin: null,
   probeResults: new Map(),
   agents: [],
   scene: null,
@@ -1255,6 +1256,7 @@ function renderTargets() {
 
   for (const target of state.targets) {
     const card = el("div", "target-card");
+    card.dataset.plugin = target.plugin;
     const head = el("div", "target-head");
     head.append(el("strong", null, target.label));
     head.append(
@@ -1307,6 +1309,22 @@ function renderTargets() {
     if (probe) card.append(el("p", `probe ${probe.ok ? "ok" : "bad"}`, `${probe.ok ? "✓" : "✗"} ${probe.message}`));
     els.targetsList.append(card);
   }
+}
+
+/**
+ * After a save, briefly focus the newly saved card so the operator (and any
+ * downstream automation reading the visible list) can find it immediately.
+ */
+function highlightTargetCard(plugin) {
+  const list = els.targetsList;
+  if (!list) return;
+  const card = list.querySelector(`[data-plugin="${CSS.escape(plugin)}"]`);
+  if (!card) return;
+  [...list.querySelectorAll(".target-card.active")].forEach((n) => n.classList.remove("active"));
+  card.classList.add("active");
+  requestAnimationFrame(() => {
+    card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
 }
 
 function renderTargetForm(target) {
@@ -1475,6 +1493,7 @@ function applyAgentState(frame) {
 }
 
 function handleFrame(frame) {
+  if (frame.type === "target.saved") window.__lastSavedFrame = frame;
   switch (frame.type) {
     case "ready": {
       els.login.hidden = true;
@@ -1576,15 +1595,30 @@ function handleFrame(frame) {
       state.targets = Array.isArray(frame.targets) ? frame.targets : [];
       state.targetsReady = frame.ready !== false;
       renderTargets();
+      {
+        const plugin = state.activeTargetPlugin;
+        if (plugin) {
+          const card = els.targetsList?.querySelector(`[data-plugin="${CSS.escape(plugin)}"]`);
+          if (card) card.classList.add("active");
+          state.activeTargetPlugin = null;
+        }
+      }
       break;
 
     case "target.saved": {
       const target = frame.target;
-      state.editingTarget = target && target.plugin ? target : null;
+      // After a save, return the form to clean "add a machine" mode so the next
+      // IP entry starts fresh, while the card for the machine we just touched is
+      // briefly highlighted so the operator (and any automation reading the list)
+      // can find it immediately.
+      state.editingTarget = null;
       if (target?.plugin) state.probeResults.delete(target.plugin);
       els.targetError.textContent = "";
-      renderTargetForm(state.editingTarget);
+      renderTargetForm(null);
       toast(`บันทึก ${target?.label ?? "เครื่อง"} แล้ว`);
+      if (target?.plugin) {
+        state.activeTargetPlugin = target.plugin;
+      }
       break;
     }
 
