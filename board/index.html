@@ -60,6 +60,8 @@
         <div class="section-title">Extensions</div>
         <ul class="ext-list" id="extension-list"></ul>
 
+        <button class="ghost wide" id="targets-btn" type="button">🖥 เครื่องที่ agent เข้าถึงได้</button>
+
         <button class="ghost wide" id="install" type="button" hidden>Install as app</button>
 
         <div class="foot">
@@ -183,6 +185,27 @@
       <div class="sheet-body">
         <p class="hint" id="approval-hint"></p>
         <div id="approval-list"></div>
+      </div>
+    </div>
+
+    <div class="sheet targets-sheet" id="targets-sheet" aria-label="Remote machines" aria-hidden="true">
+      <div class="sheet-head">
+        <span>เครื่องที่ agent เข้าถึงได้</span>
+        <button class="icon-btn" id="targets-sheet-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="hint">
+          ใส่แค่ IP ของเครื่องที่อยู่ใน Tailscale เดียวกัน แล้วกดบันทึก — ระบบตั้งชื่อ tool, port และปลั๊กอินให้เอง
+          (1 เครื่อง = 1 ปลั๊กอิน) หลังบันทึกแล้วไปติ๊กชื่อปลั๊กอินในหน้าตั้งค่า agent อีกครั้ง
+        </p>
+        <div id="targets-list"></div>
+        <div class="target-form-head">เพิ่ม / แก้ไขเครื่อง</div>
+        <div id="targets-form"></div>
+        <div class="sheet-actions">
+          <button class="primary" id="target-save" type="button">บันทึกเครื่อง</button>
+          <button class="ghost" id="target-new" type="button">ล้างฟอร์ม</button>
+        </div>
+        <p class="error" id="target-error"></p>
       </div>
     </div>
 

@@ -14,6 +14,8 @@ export type ExtensionSummary = {
   plugins: string[];
   mcp: string[];
   registry: string | null;
+  /** Tool names each plugin contributes, so the board can offer per-tool rules. */
+  pluginTools: Record<string, string[]>;
 };
 
 /**
@@ -74,6 +76,9 @@ export class ExtensionManager {
       plugins: this.plugins.map((plugin) => plugin.name),
       mcp: this.mcp.map((runtime) => runtime.name),
       registry: this.hub.registryUrl,
+      pluginTools: Object.fromEntries(
+        this.plugins.map((plugin) => [plugin.name, plugin.tools.map((tool) => tool.name)]),
+      ),
     };
   }
 
@@ -86,8 +91,14 @@ export class ExtensionManager {
    * Extension tools an agent profile may not use. An empty set means "no
    * filtering": the profile allows everything it has installed.
    */
-  blockedTools(selection: { plugins: string[] | null; mcp: string[] | null }): Set<string> {
+  blockedTools(selection: {
+    plugins: string[] | null;
+    mcp: string[] | null;
+    /** Named extension tools this caller may never invoke, whatever else it allows. */
+    denyTools?: string[] | null;
+  }): Set<string> {
     const blocked = new Set<string>();
+    for (const name of selection.denyTools ?? []) if (this.owned.has(name)) blocked.add(name);
     if (selection.plugins === null && selection.mcp === null) return blocked;
 
     const allowed = new Set<string>();

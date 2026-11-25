@@ -60,6 +60,14 @@ const els = {
   approvalHint: document.getElementById("approval-hint"),
   extensionList: document.getElementById("extension-list"),
   toolList: document.getElementById("tool-list"),
+  targetsBtn: document.getElementById("targets-btn"),
+  targetsSheet: document.getElementById("targets-sheet"),
+  targetsSheetClose: document.getElementById("targets-sheet-close"),
+  targetsList: document.getElementById("targets-list"),
+  targetsForm: document.getElementById("targets-form"),
+  targetSave: document.getElementById("target-save"),
+  targetNew: document.getElementById("target-new"),
+  targetError: document.getElementById("target-error"),
   toast: document.getElementById("toast"),
 };
 
@@ -82,6 +90,10 @@ const state = {
   defaultModel: null,
   tools: [],
   extensions: { skills: [], plugins: [], mcp: [] },
+  targets: [],
+  targetsReady: true,
+  editingTarget: null,
+  probeResults: new Map(),
   agents: [],
   scene: null,
   office: { scenes: [], characters: [] },
@@ -982,6 +994,39 @@ function selectionField(labelText, name, items, selected) {
   return formField(labelText, wrap);
 }
 
+/**
+ * Per-tool bans inside plugins the agent may use: "you can reach the phone,
+ * but never write a file there". Enforced at invoke time by the gateway.
+ */
+function denyToolField(agent) {
+  const entries = Object.entries(state.extensions.pluginTools ?? {}).filter(
+    ([, tools]) => Array.isArray(tools) && tools.length > 0,
+  );
+  if (entries.length === 0) return formField("ห้ามใช้ tool", el("p", "hint", "ยังไม่มี tool จากปลั๊กอิน"));
+
+  const wrap = el("div", "selection");
+  const denied = agent?.denyTools ?? [];
+  for (const [plugin, tools] of entries) {
+    const group = el("div", "deny-group");
+    group.append(el("p", "hint", plugin));
+    const list = el("div", "checklist");
+    for (const tool of tools) {
+      const label = el("label", "check");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.name = "agent-deny";
+      box.value = tool;
+      box.checked = denied.includes(tool);
+      label.append(box, el("span", null, tool));
+      list.append(label);
+    }
+    group.append(list);
+    wrap.append(group);
+  }
+  wrap.append(el("p", "hint", "ติ๊กไว้ = agent ตัวนี้เรียก tool นั้นไม่ได้เลย แม้จะได้ปลั๊กอินอยู่"));
+  return formField("ห้ามใช้ tool", wrap);
+}
+
 function openAgentSheet(id) {
   const agent = id ? findAgent(id) : null;
   state.sheetAgentId = agent?.id ?? null;
@@ -1042,6 +1087,7 @@ function renderAgentForm(agent) {
     selectionField("Plugins", "agent-plugin", state.extensions.plugins ?? [], agent ? agent.plugins : null),
   );
   form.append(selectionField("MCP", "agent-mcp", state.extensions.mcp ?? [], agent ? agent.mcp : null));
+  form.append(denyToolField(agent));
 
   els.agentForm.append(form);
 }
@@ -1070,6 +1116,7 @@ function readAgentForm() {
     skills: selection("skill"),
     plugins: selection("plugin"),
     mcp: selection("mcp"),
+    denyTools: checked("agent-deny"),
   };
 }
 
@@ -1170,6 +1217,185 @@ function openSession(sessionId, model) {
   send({ type: "session.history", sessionId });
   renderAgentList();
   renderOffice();
+}
+
+/* ---------- remote machines (targets) ---------- */
+
+const TARGET_TOOLS = [
+  ["run", "สั่งคำสั่ง (run)"],
+  ["read", "อ่านไฟล์ (read)"],
+  ["write", "เขียนไฟล์ (write)"],
+];
+
+function openTargetsSheet() {
+  closeDrawer();
+  els.targetsSheet.classList.add("open");
+  els.targetsSheet.setAttribute("aria-hidden", "false");
+  els.targetError.textContent = "";
+  renderTargets();
+  renderTargetForm(state.editingTarget);
+  send({ type: "targets.list" });
+}
+
+function closeTargetsSheet() {
+  els.targetsSheet.classList.remove("open");
+  els.targetsSheet.setAttribute("aria-hidden", "true");
+}
+
+function renderTargets() {
+  els.targetsList.innerHTML = "";
+  if (state.targetsReady === false) {
+    els.targetsList.append(el("p", "muted", "extension system ไม่พร้อมใช้งานบน gateway นี้"));
+    return;
+  }
+  if (state.targets.length === 0) {
+    els.targetsList.append(el("p", "muted", "ยังไม่มีเครื่อง — ใส่ IP ด้านล่างเพื่อเพิ่มเครื่องแรก"));
+    return;
+  }
+
+  for (const target of state.targets) {
+    const card = el("div", "target-card");
+    const head = el("div", "target-head");
+    head.append(el("strong", null, target.label));
+    head.append(
+      el("span", "target-addr", `${target.user ? `${target.user}@` : ""}${target.host}:${target.port}`),
+    );
+    card.append(head);
+
+    const tools = el("div", "target-tools");
+    for (const [name, text] of TARGET_TOOLS) {
+      const on = target.tools.includes(name);
+      tools.append(el("span", `badge ${on ? "on" : "off"}`, `${text} ${on ? "✓" : "–"}`));
+    }
+    card.append(tools);
+    card.append(el("p", "hint", `tool: ${target.prefix}_run · ${target.prefix}_read · ${target.prefix}_write`));
+
+    const actions = el("div", "target-actions");
+    const test = el("button", "ghost", "ทดสอบ");
+    test.type = "button";
+    test.addEventListener("click", () => {
+      test.disabled = true;
+      test.textContent = "กำลังทดสอบ…";
+      state.probeResults.delete(target.plugin);
+      renderTargets();
+      send({ type: "target.probe", plugin: target.plugin });
+      setTimeout(() => {
+        test.disabled = false;
+        test.textContent = "ทดสอบ";
+      }, 12000);
+    });
+
+    const edit = el("button", "ghost", "แก้ไข");
+    edit.type = "button";
+    edit.addEventListener("click", () => {
+      state.editingTarget = target;
+      els.targetError.textContent = "";
+      renderTargetForm(target);
+    });
+
+    const remove = el("button", "ghost danger", "ลบ");
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      if (!window.confirm(`ลบ ${target.label} (${target.host}) ออก? โฟลเดอร์จะถูกย้ายไป .removed กู้คืนได้`)) return;
+      send({ type: "target.delete", plugin: target.plugin });
+    });
+
+    actions.append(test, edit, remove);
+    card.append(actions);
+
+    const probe = state.probeResults.get(target.plugin);
+    if (probe) card.append(el("p", `probe ${probe.ok ? "ok" : "bad"}`, `${probe.ok ? "✓" : "✗"} ${probe.message}`));
+    els.targetsList.append(card);
+  }
+}
+
+function renderTargetForm(target) {
+  els.targetsForm.innerHTML = "";
+  const form = el("div", "form");
+
+  form.append(
+    formField(
+      "IP เครื่อง (Tailscale)",
+      textInput("target-host", target?.host ?? "", { placeholder: "100.126.244.52" }),
+    ),
+  );
+  form.append(
+    formField(
+      "ชื่อเรียก (ไม่บังคับ)",
+      textInput("target-nickname", target?.prefix ?? "", { placeholder: "vivo", maxLength: 16 }),
+    ),
+  );
+
+  const tools = el("div", "checklist");
+  const enabled = target ? target.tools : TARGET_TOOLS.map(([name]) => name);
+  for (const [name, text] of TARGET_TOOLS) {
+    const label = el("label", "check");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.name = "target-tool";
+    box.value = name;
+    box.checked = enabled.includes(name);
+    label.append(box, el("span", null, text));
+    tools.append(label);
+  }
+  form.append(formField("ให้ agent ทำอะไรได้บ้าง", tools));
+
+  const details = el("details", "target-more");
+  details.append(el("summary", null, "ตั้งค่าขั้นสูง"));
+  const row = el("div", "row");
+  row.append(
+    formField("port", textInput("target-port", target ? String(target.port) : "", { placeholder: "22" })),
+    formField(
+      "user",
+      textInput("target-user", target?.user ?? "", { placeholder: "เว้นว่าง = ผู้ใช้เดียวกับ gateway" }),
+    ),
+  );
+  details.append(
+    row,
+    formField(
+      "หมายเหตุถึง agent",
+      textInput("target-notes", target?.notes ?? "", { placeholder: "เช่น Termux ไม่มี GNU tools" }),
+    ),
+  );
+  if (target) details.append(el("p", "hint", `ปลั๊กอิน: ${target.plugin}`));
+
+  const hidden = document.createElement("input");
+  hidden.type = "hidden";
+  hidden.name = "target-plugin";
+  hidden.value = target?.plugin ?? "";
+  form.append(details, hidden);
+
+  els.targetsForm.append(form);
+}
+
+function readTargetForm() {
+  const val = (name) => els.targetsForm.querySelector(`[name="${name}"]`)?.value?.trim() ?? "";
+  const tools = [...els.targetsForm.querySelectorAll('input[name="target-tool"]:checked')].map(
+    (node) => node.value,
+  );
+  return {
+    plugin: val("target-plugin") || undefined,
+    host: val("target-host"),
+    nickname: val("target-nickname") || undefined,
+    port: val("target-port") || undefined,
+    user: val("target-user") || undefined,
+    notes: val("target-notes") || undefined,
+    tools,
+  };
+}
+
+function saveTarget() {
+  const payload = readTargetForm();
+  if (!payload.host) {
+    els.targetError.textContent = "ใส่ IP ของเครื่องก่อน";
+    return;
+  }
+  if (payload.tools.length === 0) {
+    els.targetError.textContent = "เลือกอย่างน้อย 1 อย่าง (สั่งคำสั่ง / อ่านไฟล์ / เขียนไฟล์)";
+    return;
+  }
+  els.targetError.textContent = "";
+  send({ type: "target.save", ...payload });
 }
 
 /* ---------- websocket ---------- */
@@ -1346,8 +1572,40 @@ function handleFrame(frame) {
       handleAgentEvent(frame.event);
       break;
 
+    case "targets.state":
+      state.targets = Array.isArray(frame.targets) ? frame.targets : [];
+      state.targetsReady = frame.ready !== false;
+      renderTargets();
+      break;
+
+    case "target.saved": {
+      const target = frame.target;
+      state.editingTarget = target && target.plugin ? target : null;
+      if (target?.plugin) state.probeResults.delete(target.plugin);
+      els.targetError.textContent = "";
+      renderTargetForm(state.editingTarget);
+      toast(`บันทึก ${target?.label ?? "เครื่อง"} แล้ว`);
+      break;
+    }
+
+    case "target.deleted":
+      state.probeResults.delete(frame.plugin);
+      if (state.editingTarget?.plugin === frame.plugin) {
+        state.editingTarget = null;
+        renderTargetForm(null);
+      }
+      toast("ลบเครื่องแล้ว (กู้คืนได้จาก extensions/plugins/.removed)");
+      break;
+
+    case "target.probe":
+      state.probeResults.set(frame.plugin, { ok: Boolean(frame.ok), message: frame.message ?? "" });
+      renderTargets();
+      toast(frame.ok ? `ทดสอบผ่าน: ${frame.message}` : `ทดสอบไม่ผ่าน: ${frame.message}`);
+      break;
+
     case "error":
       if (els.agentSheet.classList.contains("open")) els.agentError.textContent = frame.message ?? "gateway error";
+      else if (els.targetsSheet.classList.contains("open")) els.targetError.textContent = frame.message ?? "gateway error";
       else {
         toast(frame.message ?? "gateway error");
         if (state.view === "chat") addBubble("error", frame.message ?? "gateway error");
@@ -1482,6 +1740,14 @@ els.addAgent.addEventListener("click", () => openAgentSheet(null));
 els.agentSave.addEventListener("click", saveAgent);
 els.approvalsBtn.addEventListener("click", openApprovalSheet);
 els.approvalSheetClose.addEventListener("click", closeApprovalSheet);
+els.targetsBtn?.addEventListener("click", openTargetsSheet);
+els.targetsSheetClose?.addEventListener("click", closeTargetsSheet);
+els.targetSave?.addEventListener("click", saveTarget);
+els.targetNew?.addEventListener("click", () => {
+  state.editingTarget = null;
+  els.targetError.textContent = "";
+  renderTargetForm(null);
+});
 
 els.agentChat.addEventListener("click", () => {
   const agent = findAgent(state.sheetAgentId);
@@ -1513,6 +1779,7 @@ document.addEventListener("keydown", (event) => {
   closeModelSheet();
   closeAgentSheet();
   closeApprovalSheet();
+  closeTargetsSheet();
 });
 
 /* ---------- app lifecycle ---------- */

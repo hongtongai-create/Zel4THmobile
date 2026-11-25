@@ -187,7 +187,11 @@ export class AgentHarness {
   private blockedTools(agent: AgentProfile | null): Set<string> {
     const extensions = this.deps.extensions;
     if (!extensions || !agent) return new Set();
-    return extensions.blockedTools({ plugins: agent.plugins, mcp: agent.mcp });
+    return extensions.blockedTools({
+      plugins: agent.plugins,
+      mcp: agent.mcp,
+      denyTools: agent.denyTools,
+    });
   }
 
   /** Keep the system message plus a recent, tool-call-safe window of history. */

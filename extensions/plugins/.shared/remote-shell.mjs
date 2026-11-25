@@ -57,6 +57,28 @@ export function createRemoteShellTools(config) {
   const label = String(config.label ?? host);
   const notes = String(config.notes ?? "").trim();
 
+  // The board decides which of the three tools this machine exposes at all.
+  // A read-only machine simply has no write tool, instead of rejecting one.
+  const enabled = Array.isArray(config.tools)
+    ? new Set(config.tools.filter((name) => name === "run" || name === "read" || name === "write"))
+    : new Set(["run", "read", "write"]);
+
+  /** Extra per-machine bans written by the operator, as regex sources. */
+  const extraDeny = Array.isArray(config.denyExtra)
+    ? config.denyExtra.filter((source) => typeof source === "string" && source.trim())
+    : [];
+
+  function extraDeniedReason(command) {
+    for (const source of extraDeny) {
+      try {
+        if (new RegExp(source, "i").test(command)) return `กฎของเครื่องนี้: ${source}`;
+      } catch {
+        /* an unparsable pattern is ignored rather than blocking everything */
+      }
+    }
+    return null;
+  }
+
   function sshArgs(remoteCommand) {
     return [
       "-p",
@@ -109,7 +131,7 @@ export function createRemoteShellTools(config) {
     async handler(args) {
       const command = String(args.command ?? "").trim();
       if (!command) return "ต้องระบุ command";
-      const denied = deniedReason(command);
+      const denied = deniedReason(command) ?? extraDeniedReason(command);
       if (denied) return `ปฏิเสธคำสั่งนี้ (${denied}) — ขอให้ผู้ใช้ทำเองถ้าจำเป็นจริง ๆ`;
       const seconds = Number(args.timeout_seconds);
       const timeoutMs = (Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_TIMEOUT_S) * 1000;
@@ -182,5 +204,9 @@ export function createRemoteShellTools(config) {
     },
   };
 
-  return [runTool, readTool, writeTool];
+  return [
+    ...(enabled.has("run") ? [runTool] : []),
+    ...(enabled.has("read") ? [readTool] : []),
+    ...(enabled.has("write") ? [writeTool] : []),
+  ];
 }

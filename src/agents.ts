@@ -19,6 +19,8 @@ export type AgentProfile = {
   skills: Selection;
   plugins: Selection;
   mcp: Selection;
+  /** Individual extension tools this agent may never call, by tool name. */
+  denyTools: string[];
   color: string;
   /** Office character asset id, or an image path starting with "/". */
   sprite: string | null;
@@ -46,6 +48,7 @@ const DEFAULT_AGENT: Omit<AgentProfile, "createdAt" | "updatedAt"> = {
   skills: null,
   plugins: null,
   mcp: null,
+  denyTools: [],
   color: "#6ee7b7",
   sprite: "sirius",
   x: 34,
@@ -64,6 +67,19 @@ function slug(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 24);
+}
+
+/** A plain list of names: missing or malformed input means "none". */
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function selection(value: unknown): Selection {
@@ -110,9 +126,9 @@ export class AgentRegistry {
         parsed = {
           version: 1,
           scene: typeof candidate.scene === "string" ? candidate.scene : null,
-          agents: candidate.agents.filter(
-            (agent): agent is AgentProfile => Boolean(agent) && typeof agent.id === "string",
-          ),
+          agents: candidate.agents
+            .filter((agent): agent is AgentProfile => Boolean(agent) && typeof agent.id === "string")
+            .map((agent) => ({ ...agent, denyTools: stringList(agent.denyTools) })),
         };
       }
     } catch {
@@ -198,6 +214,7 @@ export class AgentRegistry {
       skills: selection(input.skills),
       plugins: selection(input.plugins),
       mcp: selection(input.mcp),
+      denyTools: stringList(input.denyTools),
       color: shortText(input.color, 24) ?? "#6ee7b7",
       sprite: shortText(input.sprite, 200),
       x: 18 + ((index * 17) % 64),
@@ -224,6 +241,7 @@ export class AgentRegistry {
     if ("skills" in patch) agent.skills = selection(patch.skills);
     if ("plugins" in patch) agent.plugins = selection(patch.plugins);
     if ("mcp" in patch) agent.mcp = selection(patch.mcp);
+    if ("denyTools" in patch) agent.denyTools = stringList(patch.denyTools);
     if (typeof patch.color === "string" && patch.color.trim()) agent.color = patch.color.trim().slice(0, 24);
     if ("sprite" in patch) agent.sprite = shortText(patch.sprite, 200);
     if (typeof patch.x === "number") agent.x = clamp(patch.x, 2, 96);

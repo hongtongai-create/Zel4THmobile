@@ -10,6 +10,14 @@ import type { LineChannel } from "../channels/line.js";
 import type { Config } from "../config.js";
 import type { ApprovalQueue } from "../extensions/approvals.js";
 import { ApprovalService } from "../extensions/approval-service.js";
+import {
+  listTargets,
+  probeTarget,
+  removeTarget,
+  saveTarget,
+  type RemoteTarget,
+  type TargetInput,
+} from "../extensions/targets.js";
 import type { Logger } from "../log.js";
 import { loadOfficeAssets, type OfficeAssets } from "../office.js";
 import type { AgentEvent, SessionChannel } from "../types.js";
@@ -188,6 +196,25 @@ export function createGateway(options: GatewayOptions) {
 
   const diagnostics = () => harness.extensions?.diagnostics() ?? [];
 
+  /** Where remote-machine plugins live; null when extensions are turned off. */
+  const pluginsDir = () => (harness.extensions ? path.join(harness.extensions.dir, "plugins") : null);
+
+  /** Every machine the board may edit, plus whether editing is possible at all. */
+  async function targetsState(): Promise<{
+    type: "targets.state";
+    ready: boolean;
+    targets: RemoteTarget[];
+  }> {
+    const dir = pluginsDir();
+    return { type: "targets.state", ready: Boolean(dir), targets: dir ? await listTargets(dir) : [] };
+  }
+
+  function requirePluginsDir(socket: WebSocket): string | null {
+    const dir = pluginsDir();
+    if (!dir) send(socket, { type: "error", message: "extension system ไม่พร้อมใช้งาน" });
+    return dir;
+  }
+
   function approvalsState() {
     return {
       type: "approvals.state",
@@ -304,6 +331,50 @@ export function createGateway(options: GatewayOptions) {
           if (typeof msg.y === "number") patch.y = msg.y;
           await agents.update(id, patch);
           await broadcastAgents();
+          return;
+        }
+
+        case "targets.list":
+          send(socket, await targetsState());
+          return;
+
+        case "target.save": {
+          const dir = requirePluginsDir(socket);
+          if (!dir) return;
+          const target = await saveTarget(dir, msg as unknown as TargetInput);
+          // New plugin, new tools: reload so the agent sees them this second.
+          await harness.extensions?.reload();
+          send(socket, { type: "target.saved", target });
+          send(socket, await targetsState());
+          await broadcastAgents();
+          send(socket, approvalsState());
+          return;
+        }
+
+        case "target.delete": {
+          const dir = requirePluginsDir(socket);
+          if (!dir) return;
+          const plugin = typeof msg.plugin === "string" ? msg.plugin : "";
+          const movedTo = await removeTarget(dir, plugin);
+          await harness.extensions?.reload();
+          send(socket, { type: "target.deleted", plugin, movedTo });
+          send(socket, await targetsState());
+          await broadcastAgents();
+          send(socket, approvalsState());
+          return;
+        }
+
+        case "target.probe": {
+          const dir = requirePluginsDir(socket);
+          if (!dir) return;
+          const plugin = typeof msg.plugin === "string" ? msg.plugin : "";
+          const target = (await listTargets(dir)).find((entry) => entry.plugin === plugin);
+          if (!target) {
+            send(socket, { type: "error", message: "ไม่พบเครื่องนี้" });
+            return;
+          }
+          const result = await probeTarget(target);
+          send(socket, { type: "target.probe", plugin, ok: result.ok, message: result.message });
           return;
         }
 
