@@ -371,6 +371,17 @@ button {
   box-shadow: 24px 0 60px #0009;
 }
 
+/* The pin only matters where the drawer can be a sidebar. */
+.drawer-head .pin-btn {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .drawer-head .pin-btn {
+    display: inline-flex;
+  }
+}
+
 .drawer-head {
   display: flex;
   align-items: center;
@@ -693,18 +704,22 @@ button:disabled {
     flex-direction: row;
   }
 
+  /* Pinned: a real sidebar. Unpinned: the drawer slides over the office. */
   .drawer {
+    box-shadow: none;
+  }
+
+  body.drawer-pinned .drawer {
     position: static;
     transform: none;
     width: 280px;
     flex: 0 0 280px;
-    box-shadow: none;
     padding-top: 20px;
   }
 
-  .drawer-head .icon-btn,
-  #menu,
-  .scrim {
+  body.drawer-pinned #drawer-close,
+  body.drawer-pinned #menu,
+  body.drawer-pinned .scrim {
     display: none;
   }
 
@@ -789,11 +804,14 @@ body[data-view="office"] .model-chip {
   display: none;
   flex-direction: column;
   overflow: hidden;
-  left: calc(var(--safe-left) + 10px);
-  right: calc(var(--safe-right) + 10px);
+  /* Centred at the bottom of the screen, the way a chat window feels. */
+  left: 50%;
+  right: auto;
   bottom: calc(var(--safe-bottom) + 10px);
-  height: 68vh;
-  height: 68dvh;
+  width: min(560px, calc(100vw - var(--safe-left) - var(--safe-right) - 20px));
+  transform: translateX(-50%);
+  height: 60vh;
+  height: 60dvh;
   background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(16px);
   border: 1px solid var(--line);
@@ -807,12 +825,9 @@ body[data-view="chat"] .chat {
 
 @media (min-width: 720px) {
   .chat {
-    left: auto;
-    right: calc(var(--safe-right) + 16px);
-    top: calc(var(--safe-top) + 72px);
-    bottom: calc(var(--safe-bottom) + 16px);
-    width: min(460px, 46vw);
-    height: auto;
+    width: min(620px, 62vw);
+    height: 62vh;
+    height: 62dvh;
     border-radius: 20px;
   }
 }

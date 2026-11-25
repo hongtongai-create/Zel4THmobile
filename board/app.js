@@ -3,6 +3,7 @@ const els = {
   scrim: document.getElementById("scrim"),
   menu: document.getElementById("menu"),
   drawerClose: document.getElementById("drawer-close"),
+  drawerPin: document.getElementById("drawer-pin"),
   install: document.getElementById("install"),
   login: document.getElementById("login"),
   loginForm: document.getElementById("login-form"),
@@ -309,6 +310,30 @@ function openDrawer() {
 function closeDrawer() {
   els.drawer.classList.remove("open");
   els.scrim.classList.remove("show");
+}
+
+const PIN_KEY = "clawgate.drawerPinned";
+
+function drawerIsPinned() {
+  return document.body.classList.contains("drawer-pinned");
+}
+
+/** Pin the left bar open as a sidebar, or let it slide away as a drawer. */
+function setDrawerPinned(pinned) {
+  document.body.classList.toggle("drawer-pinned", pinned);
+  if (els.drawerPin) {
+    els.drawerPin.setAttribute("aria-pressed", String(pinned));
+    els.drawerPin.textContent = pinned ? "📌" : "📍";
+    els.drawerPin.title = pinned ? "ปลดหมุดเมนู" : "ปักหมุดเมนู";
+  }
+  try {
+    localStorage.setItem(PIN_KEY, pinned ? "1" : "0");
+  } catch {
+    /* private mode: the choice simply does not persist */
+  }
+  if (pinned) closeDrawer();
+  // The office stage changed width, so the scene has to be re-fitted.
+  layoutSceneFrame();
 }
 
 function openModelSheet() {
@@ -1325,6 +1350,12 @@ els.input.addEventListener("input", () => {
 
 els.menu.addEventListener("click", openDrawer);
 els.drawerClose.addEventListener("click", closeDrawer);
+els.drawerPin?.addEventListener("click", () => setDrawerPinned(!drawerIsPinned()));
+try {
+  setDrawerPinned(localStorage.getItem(PIN_KEY) !== "0");
+} catch {
+  setDrawerPinned(true);
+}
 els.scrim.addEventListener("click", closeDrawer);
 els.modelBtn.addEventListener("click", openModelSheet);
 els.sheetClose.addEventListener("click", closeModelSheet);
