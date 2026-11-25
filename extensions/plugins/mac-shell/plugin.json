@@ -1,0 +1,14 @@
+{
+  "name": "mac-shell",
+  "description": "Shell and file access to the Mac (Tailscale 100.102.143.107) over ssh.",
+  "entry": "index.mjs",
+  "prompt": "The mac_* tools run on the operator's Mac, not on this machine. Use mac_run for shell commands, mac_read to read a file, mac_write to create or replace one. It is macOS: use zsh/bash tools, /Users/lastcore as home, and osascript or open for GUI tasks. Long commands can take a while; pass timeout_seconds for builds.",
+  "config": {
+    "toolPrefix": "mac",
+    "label": "Mac (macOS)",
+    "host": "100.102.143.107",
+    "port": 22,
+    "user": "lastcore",
+    "notes": "macOS: ใช้ osascript/open/brew ได้, home คือ /Users/lastcore."
+  }
+}

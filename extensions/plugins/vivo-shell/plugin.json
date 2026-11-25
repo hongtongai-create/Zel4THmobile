@@ -1,0 +1,14 @@
+{
+  "name": "vivo-shell",
+  "description": "Shell and file access to the vivo Android phone (droid-server) over Tailscale ssh.",
+  "entry": "index.mjs",
+  "prompt": "The vivo_* tools run on the operator's Android phone (Termux), not on this machine. Use vivo_run for shell commands there, vivo_read to read a file, vivo_write to create or replace one. Termux home is /data/data/com.termux/files/home; shared storage is /sdcard. Prefer short, single-purpose commands and check the exit code before assuming success.",
+  "config": {
+    "toolPrefix": "vivo",
+    "label": "มือถือ vivo (Termux)",
+    "host": "100.126.244.52",
+    "port": 8022,
+    "user": "u0_a218",
+    "notes": "Termux บน Android: คำสั่ง GNU หลายตัวไม่มี, ใช้ termux-*, am, pm, dumpsys ได้."
+  }
+}
