@@ -321,6 +321,192 @@ import แล้ว throw, export ไม่ตรงสัญญา `{ name, des
 และ 40 ไฟล์ต่อ entry — registry ยังเป็นโค้ดที่รันได้ (plugin) จึงควรใช้ registry ที่คุณควบคุมเอง
 repo นี้มี index ตัวอย่างที่ `clawhub/index.json`
 
+## ให้ agent คุมเครื่องอื่น (หนึ่งปลั๊กอิน = หนึ่งเครื่อง)
+
+agent ไม่ได้มี "computer" ติดตัว — มันรันอยู่ในโปรเซสของ gateway ที่เครื่องไหนก็ตาม
+สิ่งที่ทำให้มันไปสั่งงานเครื่องอื่นได้คือ **ปลั๊กอินที่ห่อ ssh ไว้** โดยมีกฎง่าย ๆ:
+
+```
+[gateway รันที่ไหน]  ──ssh ออกไป──▶  [เครื่องปลายทางใน plugin.json]
+   agent อยู่ที่นี่                     เครื่องที่ถูกคุม (compute)
+```
+
+- **หนึ่งโฟลเดอร์ปลั๊กอิน = หนึ่งเครื่อง** เพราะสิทธิ์ของ agent คุมที่ระดับปลั๊กอิน
+  (`plugins` ใน `agents.json`) จึงเลือกได้ว่า agent ตัวไหนแตะเครื่องไหน
+- ปลั๊กอินอ่านค่าจาก `plugin.json` → `config` (ไม่ต้องตั้ง env ก็ได้) แต่ override ด้วย env
+  `<PREFIX>_HOST`, `<PREFIX>_PORT`, `<PREFIX>_USER` ได้ เช่น `MAC_HOST=...`
+- โค้ด ssh ที่ใช้ร่วมกันอยู่ที่ `extensions/plugins/.shared/remote-shell.mjs`
+  (โฟลเดอร์ที่ขึ้นต้นด้วย `.` จะไม่ถูกโหลดเป็นปลั๊กอิน)
+
+### ปลั๊กอินที่ repo นี้ให้มา
+
+| ปลั๊กอิน | ไฟล์ตั้งค่า | ค่าเริ่มต้น | tool ที่ agent เห็น |
+| --- | --- | --- | --- |
+| `vivo-shell` | `extensions/plugins/vivo-shell/plugin.json` | `100.126.244.52:8022`, user `u0_a218` (Termux) | `vivo_run`, `vivo_read`, `vivo_write` |
+| `mac-shell` | `extensions/plugins/mac-shell/plugin.json` | `100.102.143.107:22`, user `lastcore` | `mac_run`, `mac_read`, `mac_write` |
+
+```json
+{
+  "name": "mac-shell",
+  "description": "Shell and file access to the Mac over ssh.",
+  "entry": "index.mjs",
+  "prompt": "ข้อความนี้ถูกเติมเข้า system prompt ของ agent ที่ใช้ปลั๊กอินนี้",
+  "config": {
+    "toolPrefix": "mac",
+    "label": "Mac (macOS)",
+    "host": "100.102.143.107",
+    "port": 22,
+    "user": "lastcore",
+    "notes": "คำอธิบายสั้น ๆ ที่ต่อท้าย description ของ tool"
+  }
+}
+```
+
+ทุกเครื่องได้ tool ชุดเดียวกัน (`<prefix>_run`, `<prefix>_read`, `<prefix>_write`)
+เช่น agent เรียก:
+
+```json
+{"command":"uname -a; free -m; df -h /data","timeout_seconds":30}
+```
+
+`<prefix>_run` คืน `exit: <code>` + `stdout` + `stderr` (ตัดที่ 6,000 ตัวอักษร) — agent จึงตรวจผลได้จริง
+มี deny list กันคำสั่งพังเครื่อง: `rm -rf /`, `mkfs`, `dd of=/dev/...`, `reboot|shutdown|halt`,
+`pm uninstall|clear`, `su -c` (คำสั่งที่ตรงจะถูกปฏิเสธก่อนยิง ssh)
+
+### เตรียม ssh ให้ปลายทางไว้ใจ gateway
+
+ขา gateway → ปลายทางต้องมีคีย์ (ไม่ถามรหัสผ่าน เพราะรันแบบ `BatchMode=yes`):
+
+```bash
+# บนเครื่องที่รัน gateway
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519     # ถ้ายังไม่มี
+ssh-copy-id -p 22 lastcore@100.102.143.107           # หรือ -p 8022 สำหรับ Termux
+ssh -p 22 -o BatchMode=yes lastcore@100.102.143.107 'echo OK'
+```
+
+บน Android ใช้ Termux: `pkg install openssh`, รัน `sshd` (ค่าเริ่มต้นพอร์ต 8022),
+สร้างคีย์ในเครื่องแล้วเอา `~/.ssh/id_ed25519.pub` ไปต่อท้าย `~/.ssh/authorized_keys` ของเครื่องปลายทาง
+ถ้าเป็นทิศกลับ (gateway อยู่บนมือถือ อยากคุม Mac) ให้ทำเหมือนกันแต่กลับด้าน:
+
+```bash
+# บนมือถือ (Termux)
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+cat ~/.ssh/id_ed25519.pub
+# แล้วเอาไปต่อท้าย ~/.ssh/authorized_keys ของ Mac (chmod 600, ไม่มีบรรทัดค้างโดยไม่ขึ้นบรรทัดใหม่)
+ssh -p 22 lastcore@100.102.143.107 'echo MAC-OK'
+```
+
+> เคยเจอ: ต่อคีย์แบบไม่มี newline ทำให้สองบรรทัดติดกันแล้ว sshd มองไม่เห็นคีย์
+> เช็กด้วย `ssh-keygen -l -f ~/.ssh/authorized_keys` ว่าคีย์ที่ต้องการโผล่ในลิสต์จริง
+
+### เพิ่มเครื่องที่สาม
+
+```bash
+cp -r extensions/plugins/mac-shell extensions/plugins/s23-shell
+# แก้ plugin.json: name = "s23-shell", toolPrefix = "s23", host = 100.89.67.123, user = ...
+```
+
+แล้วรีโหลด extension (ไม่ต้องรีสตาร์ท gateway ก็ได้):
+
+```bash
+node dist/cli.js extensions                 # ดูว่าปลั๊กอินขึ้น loaded
+# หรือสั่งผ่านบอร์ด/agent: {"action":"diagnostics"} แล้ว {"action":"reload"} ของ tool `extensions`
+```
+
+log ของ gateway จะขึ้น `extensions: 0 skill(s), 3 plugin(s), 0 mcp server(s)`
+(ถ้า `EXTENSIONS_AGENT_WRITES=confirm` การ `reload` จาก agent จะเข้าคิวรออนุมัติบนบอร์ด)
+
+### ให้ agent ตัวไหนใช้เครื่องไหน
+
+บอร์ด → แตะตัวละคร → ชีตตั้งค่า → หัวข้อ **Plugins** → ติ๊กเครื่องที่อนุญาต
+
+- ไม่ติ๊กเลย (`null`) = ใช้ได้ **ทุก** ปลั๊กอิน
+- ติ๊กบางตัว = allowlist เฉพาะที่ติ๊ก และถูกบังคับตอนเรียก tool จริง (`ToolRegistry.invoke`)
+- ค่าเก็บใน `agents.json` ฟิลด์ `plugins` เช่น `"plugins": ["vivo-shell"]`
+
+### ตัวอย่างที่ 1: gateway บน Linux ใช้มือถือ vivo เป็น compute
+
+สถานการณ์: gateway รันบนเครื่อง Linux ในบ้าน, agent ตัวหนึ่งชื่อ "Runner" ต้องการ CPU/เน็ตของมือถือ
+(เช่น อัปโหลดไฟล์, รันสคริปต์ที่ต้องอยู่ในเน็ตมือถือ, อ่านไฟล์ใน `/sdcard`)
+
+1. ติ๊ก `vivo-shell` ให้ agent Runner
+2. ผู้ใช้พิมพ์ในบอร์ด: `ใช้ vivo เช็กพื้นที่ว่างแล้วลิสต์ไฟล์ดาวน์โหลด 5 ไฟล์ล่าสุด`
+3. agent เรียก tool เอง:
+
+```json
+{"command":"df -h /data /sdcard | tail -2; ls -t /sdcard/Download | head -5"}
+```
+
+4. ได้ผลกลับเป็นข้อความ `exit: 0 ...` แล้ว agent สรุปเป็นภาษาไทย
+
+เขียนไฟล์/สคริปต์ข้ามเครื่อง:
+
+```json
+{"path":"/sdcard/clawgate/report.md","content":"# ยอดขายวันนี้\n- ..."}
+```
+
+ข้อจำกัดของ Termux ที่ควรรู้ (เจอจริงบนเครื่องทดสอบ):
+
+- `PATH` ของ Termux **ไม่มี** `/system/bin` → ต้องเรียกเต็มหรือเติมเอง เช่น
+  `export PATH=/system/bin:$PATH; input keyevent 4`
+- ใช้ `/system/bin/pm list packages` ได้ แต่ `/system/bin/cmd package ...` อาจ throw Binder error
+- `screencap -p /sdcard/x.png` เขียนไฟล์ได้แต่ขนาด 0 ไบต์จนกว่าจะให้สิทธิ์storage/termux-api ครบ
+- `input tap|text|keyevent` ใช้ได้ (หลังเติม PATH) → ใช้กดปุ่ม/พิมพ์แทนมือได้
+
+### ตัวอย่างที่ 2: "โพสต์คอนเทนต์ Facebook ที่ล็อกอินไว้ใน vivo"
+
+มี 3 ทาง เลือกตามสภาพเครื่องจริง (บน vivo เครื่องทดสอบ **ไม่ได้ติดตั้งแอป Facebook** —
+`pm list packages` เจอแค่ `com.facebook.services/system/appmanager` ซึ่งเป็น service ของระบบ)
+
+**A. Graph API (แนะนำ, ไม่ต้องพึ่งมือถือ)** — ตั้ง `FACEBOOK_PAGE_ID` + `FACEBOOK_PAGE_ACCESS_TOKEN`
+แล้ว agent มี tool `facebook_post` ใช้ได้เอง (โพสต์ลง Page, token อยู่ฝั่งเซิร์ฟเวอร์):
+
+```json
+{"message":"โปรโมชันสัปดาห์นี้ ลด 20%","link":"https://example.com/promo"}
+```
+
+**B. ใช้ session เบราว์เซอร์ที่ล็อกอินค้างไว้บนมือถือ** — เปิดหน้าคอมโพสผ่าน intent
+แล้วให้ agent พิมพ์/กดด้วย `input` (ต้องเติม PATH ก่อน):
+
+```bash
+/system/bin/am start -a android.intent.action.VIEW -d 'https://m.facebook.com/'
+export PATH=/system/bin:$PATH
+input tap 540 2100        # แตะช่องเขียนโพสต์ (พิกัดจริงต้องดูจากหน้าจอเครื่อง)
+input text 'hello%sworld' # เว้นวรรคใน input text ต้องเขียนเป็น %s
+```
+
+ข้อควรระวัง: พิกัดปุ่มขึ้นกับรุ่น/ธีม/ขนาดฟอนต์, หน้าเว็บอาจเด้งไปเปิดแอป, และ **ไม่มีอะไรยืนยันว่าโพสต์สำเร็จ**
+ถ้าไม่เช็กหน้าจอ — ควรให้คนกด "โพสต์" เองเป็นค่าเริ่มต้น
+
+**C. ถ้าติดตั้งแอป Facebook ภายหลัง** — ใช้ share intent เปิดหน้าคอมโพสพร้อมข้อความ (คนกด Post เอง):
+
+```bash
+/system/bin/am start -a android.intent.action.SEND -t text/plain \
+  --es android.intent.extra.TEXT 'โปรโมชันสัปดาห์นี้ ลด 20%' \
+  -p com.facebook.katana
+```
+
+ถ้าอยากให้ "สั่งแล้วจบ" จริง ๆ ให้ใช้ทาง A (Graph API) หรือเขียนปลั๊กอินเฉพาะที่ยืนยันผลได้
+(เช่น อ่าน feed กลับมาเช็ก) ดีกว่าฝากความหวังไว้กับการเดาพิกัด
+
+### ความปลอดภัย
+
+- tool จากปลั๊กอิน **ไม่มีการขออนุมัติ** (ระบบอนุมัติคุมเฉพาะการติดตั้ง/ถอด extension)
+  ปลั๊กอินจึงมีสิทธิ์เท่ากับ user ที่รัน gateway — ให้เฉพาะ agent ที่ไว้ใจ
+- จำกัดด้วย allowlist ต่อ agent และอย่าให้ทุกตัวเห็นเครื่องที่มีข้อมูลสำคัญ
+- ถ้าต้องการปิดทาง ssh ทั้งหมด: ลบโฟลเดอร์ปลั๊กอินหรือตั้ง `plugins: []` ให้ agent
+- คีย์ส่วนตัวอยู่บนเครื่องที่รัน gateway เท่านั้น — อย่า commit `~/.ssh` ลง repo
+
+### แก้ปัญหาที่เจอบ่อย
+
+| อาการ | สาเหตุ / ทางแก้ |
+| --- | --- |
+| `Permission denied (publickey,...)` | คีย์ของเครื่อง gateway ยังไม่อยู่ใน `authorized_keys` ของปลายทาง หรือบรรทัดคีย์เสีย (newline) — เช็ก `ssh-keygen -l -f` |
+| `Connection refused` / timeout | ปลายทางไม่เปิด sshd, พอร์ตผิด (Termux = 8022), หรือ Tailscale ไม่ได้ connect |
+| `input: app_process: inaccessible` | ยังไม่เติม `export PATH=/system/bin:$PATH` |
+| ปลั๊กอินไม่ขึ้นในบอร์ด | `{"action":"diagnostics"}` ดู `skipped`/`failed` + เหตุผล แล้ว `{"action":"reload"}` |
+| agent มองไม่เห็น tool เลย | ยังไม่ติ๊กปลั๊กอินในชีต agent (หรือติ๊กตัวอื่นไว้ = allowlist ปิดตัวนี้) |
+
 ## Board + gateway protocol
 
 board เปิด WebSocket ไปที่ `ws://<host>/ws?token=<GATEWAY_TOKEN>` (หรือ header
