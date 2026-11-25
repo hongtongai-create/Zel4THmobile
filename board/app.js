@@ -36,6 +36,8 @@ const els = {
   talkName: document.getElementById("talk-name"),
   talkText: document.getElementById("talk-text"),
   talkClose: document.getElementById("talk-close"),
+  chatAlpha: document.getElementById("chat-alpha"),
+  talkAlpha: document.getElementById("talk-alpha"),
   stage: document.getElementById("stage"),
   sceneLayer: document.getElementById("scene-layer"),
   sceneFrame: document.getElementById("scene-frame"),
@@ -61,6 +63,9 @@ const els = {
   toast: document.getElementById("toast"),
 };
 
+const ALPHA_KEY = "clawgate.dlgAlpha";
+/** Opacity of the dialogue plates: default, then more see-through, then solid. */
+const ALPHA_STEPS = [80, 62, 92];
 const SESSION_KEY = "clawgate.session";
 const TOKEN_KEY = "clawgate.token";
 const MODEL_KEY = "clawgate.model";
@@ -332,6 +337,30 @@ function closeDrawer() {
 }
 
 const PIN_KEY = "clawgate.drawerPinned";
+
+/* ---------- dialogue opacity ---------- */
+
+let alphaIndex = 0;
+
+/** Both plates share one --dlg-alpha, so they always see through alike. */
+function applyDialogAlpha(percent) {
+  document.documentElement.style.setProperty("--dlg-alpha", `${percent}%`);
+  const transparency = `${100 - percent}%`;
+  for (const button of [els.chatAlpha, els.talkAlpha]) {
+    if (!button) continue;
+    button.dataset.alpha = String(percent);
+    button.title = `โปร่งแสง ${transparency} — กดเพื่อสลับ`;
+    button.setAttribute("aria-label", `โปร่งแสง ${transparency}`);
+  }
+}
+
+function cycleDialogAlpha() {
+  alphaIndex = (alphaIndex + 1) % ALPHA_STEPS.length;
+  const percent = ALPHA_STEPS[alphaIndex];
+  applyDialogAlpha(percent);
+  storage.set(ALPHA_KEY, String(percent));
+  toast(`หน้าต่างโปร่งแสง ${100 - percent}%`);
+}
 
 function drawerIsPinned() {
   return document.body.classList.contains("drawer-pinned");
@@ -1424,6 +1453,16 @@ els.input.addEventListener("input", () => {
 });
 
 els.talkClose.addEventListener("click", hideTalk);
+els.chatAlpha?.addEventListener("click", cycleDialogAlpha);
+els.talkAlpha?.addEventListener("click", cycleDialogAlpha);
+try {
+  const savedAlpha = Number.parseInt(storage.get(ALPHA_KEY) ?? "", 10);
+  alphaIndex = ALPHA_STEPS.indexOf(savedAlpha);
+  if (alphaIndex < 0) alphaIndex = 0;
+} catch {
+  alphaIndex = 0;
+}
+applyDialogAlpha(ALPHA_STEPS[alphaIndex]);
 els.menu.addEventListener("click", openDrawer);
 els.drawerClose.addEventListener("click", closeDrawer);
 els.drawerPin?.addEventListener("click", () => setDrawerPinned(!drawerIsPinned()));

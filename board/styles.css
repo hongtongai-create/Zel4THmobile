@@ -10,6 +10,8 @@
   --danger: #f87171;
   --radius: 14px;
   --actor-size: 132px;
+  /* Opacity of the dialogue plates; the ◐ button cycles it. */
+  --dlg-alpha: 80%;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -824,7 +826,14 @@ body[data-view="office"] .model-chip {
   padding: 10px 10px 8px;
   gap: 6px;
   color: #eef1ff;
-  background: linear-gradient(165deg, #454e8d 0%, #353b70 42%, #262a52 100%);
+  /* See-through enough that the office stays readable behind the plate. */
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, #454e8d var(--dlg-alpha), transparent) 0%,
+    color-mix(in srgb, #353b70 var(--dlg-alpha), transparent) 42%,
+    color-mix(in srgb, #262a52 var(--dlg-alpha), transparent) 100%
+  );
+  backdrop-filter: blur(18px) saturate(1.05);
   border: 2px solid #c9d2ff;
   border-radius: 16px;
   box-shadow:
@@ -929,7 +938,13 @@ body[data-view="chat"] .chat {
   gap: 10px;
   padding: 10px 12px;
   color: #eef1ff;
-  background: linear-gradient(165deg, #454e8d 0%, #353b70 42%, #262a52 100%);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, #454e8d var(--dlg-alpha), transparent) 0%,
+    color-mix(in srgb, #353b70 var(--dlg-alpha), transparent) 42%,
+    color-mix(in srgb, #262a52 var(--dlg-alpha), transparent) 100%
+  );
+  backdrop-filter: blur(18px) saturate(1.05);
   border: 2px solid #c9d2ff;
   border-radius: 16px;
   box-shadow:
@@ -980,6 +995,24 @@ body[data-view="chat"] .chat {
   background: #ffffff14;
   color: #d8dfff;
   font-size: 12px;
+}
+
+.dlg-alpha {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #ffffff33;
+  border-radius: 8px;
+  background: #ffffff14;
+  color: #d8dfff;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.dlg-alpha:active {
+  background: #ffffff2e;
 }
 
 @keyframes talk-in {
