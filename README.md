@@ -54,6 +54,41 @@ socket: ws://localhost:8787/ws
 `npm run usage` (สรุป token/ค่าใช้จ่าย), `npm run build && npm start` (prod build),
 `npm run smoke` (ทดสอบ gateway + agent loop ด้วย stub server)
 
+### อัปเดตโค้ดบนเครื่องที่รันอยู่ (Termux / มือถือ / Mac)
+
+```bash
+cd ~/Zel4THmobile
+# กด Ctrl+C ให้ gateway ตัวเก่าหยุดก่อน
+
+git pull
+npm install
+npm run build && npm start
+```
+
+เปิดบอร์ดด้วย URL token เดิมอีกครั้ง (ไม่ต้องแตะ `.env` และข้อมูลใน `data/` ไม่ถูกทับ)
+
+#### ถ้า `npm install` เตือน `install-scripts … not covered by allowScripts`
+
+npm 12 (ตั้งแต่ ก.ค. 2026) บล็อก lifecycle script ของ dependency โดยค่าเริ่มต้น — **ไม่ใช่ error**
+และไม่กระทบ `npm start` (รันไฟล์ที่ compile แล้ว) ตัวที่ถูกบล็อกคือ `esbuild` ซึ่งใช้เฉพาะ `npm run dev`
+รีโปนี้ประกาศ `"allowScripts": { "esbuild": true }` ไว้แล้ว แต่ถ้าเครื่องยังใช้โค้ดเวอร์ชันเก่า หรือ
+npm ยังไม่เห็นค่านี้ ให้อนุมัติเอง:
+
+```bash
+# npm 12
+npm install-scripts approve esbuild
+npm rebuild esbuild
+npm install-scripts ls        # ควรขึ้นว่าว่าง ไม่มีอะไรค้าง
+
+# npm 11.16–11.x (คำสั่งชื่อเก่า)
+npm approve-scripts esbuild
+npm rebuild esbuild
+```
+
+อนุมัติแล้วไม่ย้อนหลังอัตโนมัติ — ต้อง `npm rebuild esbuild` ตามหนึ่งครั้ง ไม่งั้น `npm run dev` จะไม่พบ binary
+
+<!-- หมายเหตุ: ส่วนนี้ต้องเหมือนกับ docs/USAGE.md §2.1 -->
+
 ## ตั้งค่า model
 
 model ใช้รูปแบบ `provider:model` และทุก provider ใช้ API แบบ OpenAI-compatible

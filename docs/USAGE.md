@@ -59,6 +59,56 @@ npm start            # = node dist/cli.js gateway
 
 ระหว่างพัฒนาใช้ `npm run dev` (tsx, ไม่ต้อง build) ได้
 
+### 2.1 อัปเดตโค้ดบนเครื่องที่รันอยู่ (Termux / มือถือ / Mac)
+
+ใช้ทุกครั้งที่ต้องการอัปเดตเป็นเวอร์ชันใหม่:
+
+```bash
+cd ~/Zel4THmobile
+# กด Ctrl+C ให้ gateway ตัวเก่าหยุดก่อน
+
+git pull
+npm install
+npm run build && npm start
+```
+
+- `.env` ไม่ต้องแตะ (ตั้งค่าเดิมใช้ต่อ)
+- ข้อมูลใน `data/` (agent, ประวัติแชท, usage) ไม่ถูกทับ — โฟลเดอร์นี้ถูก gitignore
+- หลังรีสตาร์ท เปิดบอร์ดด้วย URL token เดิม; ถ้าไอคอน/เชลล์เก่าค้าง ให้รีเฟรชหน้า (service worker ถูก bump เวอร์ชันให้เอง)
+- ตรวจว่าเวอร์ชันที่รันตรงกับที่ pull มา: `node -p "require('./package.json').version"`
+
+#### npm 12 ขึ้นไป: `install-scripts` / `allowScripts`
+
+npm 12 (ตั้งแต่ ก.ค. 2026) **บล็อก install script ของ dependency โดยค่าเริ่มต้น** จึงเห็นข้อความ:
+
+```
+npm warn install-scripts 1 package had install scripts blocked because they are not covered by allowScripts:
+npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+```
+
+**ไม่ใช่ error** (exit code 0, ติดตั้งสำเร็จ) และ **ไม่กระทบ `npm start`** เพราะสคริปต์ที่ถูกบล็อกคือ `esbuild`
+ของ `tsx` ซึ่งใช้เฉพาะ `npm run dev` รีโปนี้ประกาศ `"allowScripts": { "esbuild": true }` ไว้ใน `package.json` แล้ว
+ถ้ายังเห็น warning (เช่น pull โค้ดเก่ามา หรือ npm ยังไม่อ่านฟิลด์นี้) ให้ทำอย่างใดอย่างหนึ่ง:
+
+```bash
+# ทางที่ 1: อนุมัติเอง (npm 12)
+npm install-scripts approve esbuild
+npm rebuild esbuild
+npm install-scripts ls          # ควรขึ้นว่าว่าง ไม่มีอะไรค้าง
+
+# ทางที่ 2: npm 11.16–11.x ที่ใช้คำสั่งชื่อเก่า
+npm approve-scripts esbuild
+npm rebuild esbuild
+
+# ทางที่ 3: ดึงโค้ดใหม่ที่มี allowScripts แล้วติดตั้งอีกครั้ง
+git pull && npm install
+```
+
+อนุมัติแล้วไม่ย้อนหลังอัตโนมัติ — ต้อง `npm rebuild esbuild` ตามหนึ่งครั้ง ไม่งั้น `npm run dev` จะฟ้องว่าไม่พบ binary
+
+ตรวจว่า dev mode พร้อม: `npx tsx --version`
+
 > **npm 12 ขึ้นไป**: npm รุ่นใหม่บล็อก install script ของ dependency โดยค่าเริ่มต้น จึงอาจเห็น `npm warn install-scripts 1 package has install scripts not yet covered by allowScripts: esbuild`
 > — ไม่ใช่ error และไม่กระทบ `npm start` (รันไฟล์ที่ compile แล้ว) รีโปนี้ประกาศ `"allowScripts": { "esbuild": true }` ไว้ใน `package.json` แล้ว
 > ถ้าต้องการให้ `npm run dev` ทำงาน ให้อนุมัติ esbuild: `npm install-scripts approve esbuild` แล้ว `npm rebuild esbuild`
