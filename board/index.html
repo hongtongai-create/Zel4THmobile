@@ -6,15 +6,16 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <title>clawgate</title>
+    <title>Zel4THmobile</title>
     <meta name="theme-color" content="#0a0c11" />
-    <meta name="description" content="Mobile control board for the clawgate agent harness." />
+    <meta name="description" content="Mobile control board for the Zel4THmobile agent harness." />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/icons/favicon-64.png" sizes="64x64" type="image/png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="clawgate" />
+    <meta name="apple-mobile-web-app-title" content="Zel4THmobile" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -25,9 +26,15 @@
       <aside class="drawer" id="drawer" aria-label="Sessions, agents and settings">
         <div class="drawer-head">
           <div class="brand">
-            <span class="mark">◆</span>
+            <img
+              class="brand-logo"
+              src="/icons/icon-192.png"
+              alt="Zel4THmobile"
+              width="34"
+              height="34"
+            />
             <div>
-              <strong>clawgate</strong>
+              <strong>Zel4THmobile</strong>
               <small>agent harness</small>
             </div>
           </div>
@@ -59,6 +66,8 @@
 
         <div class="section-title">Extensions</div>
         <ul class="ext-list" id="extension-list"></ul>
+
+        <button class="ghost wide" id="studio-btn" type="button">🎨 ฉาก / ตัวละคร / ธีม</button>
 
         <button class="ghost wide" id="targets-btn" type="button">🖥 เครื่องที่ agent เข้าถึงได้</button>
 
@@ -107,7 +116,7 @@
             <div class="dlg-portrait" id="chat-portrait" aria-hidden="true"></div>
             <div class="dlg-titles">
               <p class="dlg-kicker">แชทกับ</p>
-              <p class="dlg-name" id="chat-speaker">clawgate</p>
+              <p class="dlg-name" id="chat-speaker">Zel4THmobile</p>
             </div>
             <span class="dlg-mark" aria-hidden="true">▼</span>
             <button
@@ -118,6 +127,9 @@
               title="ปรับความโปร่งแสง"
             >
               ◐
+            </button>
+            <button class="dlg-close" id="chat-close" type="button" aria-label="ปิดแชท" title="ปิดแชท">
+              ✕
             </button>
           </div>
 
@@ -207,6 +219,14 @@
         </div>
         <p class="error" id="target-error"></p>
       </div>
+    </div>
+
+    <div class="sheet studio-sheet" id="studio-sheet" aria-label="Office studio" aria-hidden="true">
+      <div class="sheet-head">
+        <span>สตูดิโอ · ฉาก / ตัวละคร / ธีม</span>
+        <button class="icon-btn" id="studio-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body" id="studio-form"></div>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>

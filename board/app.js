@@ -37,6 +37,7 @@ const els = {
   talkText: document.getElementById("talk-text"),
   talkClose: document.getElementById("talk-close"),
   chatAlpha: document.getElementById("chat-alpha"),
+  chatClose: document.getElementById("chat-close"),
   talkAlpha: document.getElementById("talk-alpha"),
   stage: document.getElementById("stage"),
   sceneLayer: document.getElementById("scene-layer"),
@@ -61,6 +62,10 @@ const els = {
   extensionList: document.getElementById("extension-list"),
   toolList: document.getElementById("tool-list"),
   targetsBtn: document.getElementById("targets-btn"),
+  studioBtn: document.getElementById("studio-btn"),
+  studioSheet: document.getElementById("studio-sheet"),
+  studioClose: document.getElementById("studio-close"),
+  studioForm: document.getElementById("studio-form"),
   targetsSheet: document.getElementById("targets-sheet"),
   targetsSheetClose: document.getElementById("targets-sheet-close"),
   targetsList: document.getElementById("targets-list"),
@@ -78,6 +83,8 @@ const SESSION_KEY = "clawgate.session";
 const TOKEN_KEY = "clawgate.token";
 const MODEL_KEY = "clawgate.model";
 const AGENT_PREFIX = "board:agent:";
+/** Signature of the installed machine tools, so the agent sheet refreshes only on real changes. */
+let lastPluginToolsSig = "";
 const SCENE_FALLBACK_ASPECT = 1086 / 1448;
 let sceneAspect = SCENE_FALLBACK_ASPECT;
 
@@ -90,6 +97,7 @@ const state = {
   defaultModel: null,
   tools: [],
   extensions: { skills: [], plugins: [], mcp: [] },
+  ui: { theme: { accent: "#6ee7b7" }, sizes: { character: 1, text: 15 }, props: [] },
   targets: [],
   targetsReady: true,
   editingTarget: null,
@@ -521,8 +529,11 @@ function layoutSceneFrame() {
   frame.style.height = `${Math.round(fh)}px`;
   frame.style.left = `${Math.round((w - fw) / 2)}px`;
   frame.style.top = `${Math.round(h - fh)}px`;
-  const actorSize = Math.round(clamp(Math.min(w, h) * 0.19, 104, 160));
+  const scale = state.ui?.sizes?.character ?? 1;
+  const actorSize = Math.round(clamp(Math.min(w, h) * 0.19, 104, 160) * scale);
   document.documentElement.style.setProperty("--actor-size", `${actorSize}px`);
+  const propSize = Math.round(clamp(Math.min(w, h) * 0.16, 60, 150));
+  document.documentElement.style.setProperty("--prop-size", `${propSize}px`);
 }
 
 function applyScene(scene) {
@@ -542,10 +553,226 @@ function applyScene(scene) {
   img.src = scene.image;
 }
 
+/* ---------- studio: theme, sizes and stage props ---------- */
+
+/** Applies the shared office UI (accent, text size, character size, props). */
+function applyUi() {
+  const ui = state.ui ?? {};
+  const root = document.documentElement.style;
+  const accent = ui.theme?.accent ?? "#6ee7b7";
+  root.setProperty("--accent", accent);
+  root.setProperty("--chat-font", `${ui.sizes?.text ?? 15}px`);
+  renderProps();
+  layoutSceneFrame();
+}
+
+/** Props sit between the scene art and the characters, positioned in percent. */
+function renderProps() {
+  const frame = els.sceneFrame;
+  if (!frame) return;
+  let layer = frame.querySelector(".prop-layer");
+  if (!layer) {
+    layer = el("div", "prop-layer");
+    frame.prepend(layer);
+  }
+  layer.innerHTML = "";
+  for (const prop of state.ui?.props ?? []) {
+    if (!prop?.image) continue;
+    const node = el("img", "prop");
+    node.src = prop.image;
+    node.alt = prop.name ?? "";
+    node.style.left = `${prop.x}%`;
+    node.style.top = `${prop.y}%`;
+    node.style.width = `${Math.round(140 * (prop.scale ?? 1))}px`;
+    node.dataset.id = prop.id;
+    layer.append(node);
+  }
+}
+
+function studioNumber(label, value, min, max, step, onInput) {
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value);
+  input.addEventListener("input", () => onInput(Number(input.value)));
+  return formField(`${label} · ${value}`, input);
+}
+
+function studioUpload(label, kind) {
+  const wrap = el("div", "field");
+  wrap.append(el("span", null, label));
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = kind === "props" ? "image/*,.glb" : "image/*";
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    void uploadAsset(kind, file);
+    input.value = "";
+  });
+  wrap.append(input);
+  return wrap;
+}
+
+async function uploadAsset(kind, file) {
+  const url = `/api/assets?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(state.token ?? "")}`;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `อัปโหลดไม่สำเร็จ (${response.status})`);
+    if (kind === "props") {
+      pushProp(result.image, file.name);
+    } else {
+      toast(`อัปโหลด ${file.name} แล้ว`);
+    }
+  } catch (error) {
+    toast(`อัปโหลดไม่สำเร็จ: ${error.message}`);
+  }
+}
+
+function pushProp(image, name) {
+  const props = [...(state.ui.props ?? [])];
+  props.push({ id: `prop-${Date.now().toString(36)}`, name: name.replace(/\.[^.]+$/, ""), image, x: 50, y: 85, scale: 1 });
+  saveUi({ ...state.ui, props });
+}
+
+function saveUi(next) {
+  state.ui = next;
+  applyUi();
+  send({ type: "ui.update", ui: next });
+}
+
+function renderStudio() {
+  if (!els.studioForm) return;
+  els.studioForm.innerHTML = "";
+  const ui = state.ui;
+  // Each control edits the LIVE settings, never the snapshot taken when the form
+  // was drawn, so moving two sliders in a row keeps both changes.
+  const patch = (build) => saveUi(build(state.ui));
+
+  const uploads = el("div", "field");
+  uploads.append(el("span", null, "อัปโหลด (ได้ผลทันที)"));
+  uploads.append(
+    studioUpload("ฉากหลังใหม่ (jpg/png/webp)", "scenes"),
+    studioUpload("ตัวละครใหม่ (sprite sheet ก็ได้)", "characters"),
+    studioUpload("เฟอนิเจอร์ / ของตกแต่ง (png โปร่งใส หรือ .glb)", "props"),
+  );
+  els.studioForm.append(uploads);
+
+  els.studioForm.append(
+    studioNumber("ขนาดตัวละคร", ui.sizes.character, 0.5, 2, 0.05, (value) =>
+      patch((cur) => ({ ...cur, sizes: { ...cur.sizes, character: value } })),
+    ),
+  );
+  els.studioForm.append(
+    studioNumber("ขนาดตัวอักษรแชท (px)", ui.sizes.text, 11, 22, 1, (value) =>
+      patch((cur) => ({ ...cur, sizes: { ...cur.sizes, text: value } })),
+    ),
+  );
+
+  const accent = document.createElement("input");
+  accent.type = "color";
+  accent.value = ui.theme.accent;
+  accent.addEventListener("input", () =>
+    patch((cur) => ({ ...cur, theme: { ...cur.theme, accent: accent.value } })),
+  );
+  els.studioForm.append(formField("สีเน้น (accent)", accent));
+
+  // Sheets uploaded through the studio arrive with one frame, so the walk cycle
+  // is set here instead of by editing office.json.
+  const characters = state.office.characters ?? [];
+  if (characters.length > 0) {
+    const section = el("div", "field");
+    section.append(el("span", null, "เฟรมการเดินของตัวละคร (จำนวนเฟรมในไฟล์ + fps)"));
+    for (const character of characters) {
+      const anim = state.ui.characters?.[character.id] ?? {
+        frames: character.frames ?? 1,
+        fps: character.fps ?? 0,
+      };
+      const row = el("div", "prop-row");
+      row.append(el("span", "prop-name", character.name || character.id));
+      const framesInput = document.createElement("input");
+      framesInput.type = "number";
+      framesInput.min = "1";
+      framesInput.max = "16";
+      framesInput.value = String(anim.frames);
+      const fpsInput = document.createElement("input");
+      fpsInput.type = "number";
+      fpsInput.min = "0";
+      fpsInput.max = "24";
+      fpsInput.value = String(anim.fps);
+      const apply = () =>
+        patch((cur) => ({
+          ...cur,
+          characters: {
+            ...cur.characters,
+            [character.id]: {
+              frames: Math.max(1, Math.min(16, Number(framesInput.value) || 1)),
+              fps: Math.max(0, Math.min(24, Number(fpsInput.value) || 0)),
+            },
+          },
+        }));
+      framesInput.addEventListener("change", apply);
+      fpsInput.addEventListener("change", apply);
+      row.append(formField("เฟรม", framesInput), formField("fps", fpsInput));
+      section.append(row);
+    }
+    els.studioForm.append(section);
+  }
+
+  if ((ui.props ?? []).length > 0) {
+    const list = el("div", "field");
+    list.append(el("span", null, "ของตกแต่งบนฉาก"));
+    for (const prop of ui.props) {
+      const row = el("div", "prop-row");
+      row.append(el("span", "prop-name", prop.name || prop.id));
+      row.append(
+        studioNumber("x", prop.x, 0, 100, 1, (value) => updateProp(prop.id, { x: value })),
+        studioNumber("y", prop.y, 0, 100, 1, (value) => updateProp(prop.id, { y: value })),
+        studioNumber("ขนาด", prop.scale, 0.2, 3, 0.05, (value) => updateProp(prop.id, { scale: value })),
+      );
+      const remove = el("button", "ghost", "ลบ");
+      remove.type = "button";
+      remove.addEventListener("click", () => {
+        patch((cur) => ({ ...cur, props: cur.props.filter((entry) => entry.id !== prop.id) }));
+        renderStudio();
+      });
+      row.append(remove);
+      list.append(row);
+    }
+    els.studioForm.append(list);
+  }
+}
+
+function updateProp(id, patch) {
+  const props = state.ui.props.map((prop) => (prop.id === id ? { ...prop, ...patch } : prop));
+  saveUi({ ...state.ui, props });
+}
+
+function openStudio() {
+  closeDrawer();
+  els.studioSheet.classList.add("open");
+  els.studioSheet.setAttribute("aria-hidden", "false");
+  send({ type: "ui.get" });
+  renderStudio();
+}
+
+function closeStudio() {
+  els.studioSheet.classList.remove("open");
+  els.studioSheet.setAttribute("aria-hidden", "true");
+}
+
 function renderOffice() {
   const scenes = state.office.scenes ?? [];
   const scene = scenes.find((entry) => entry.id === state.scene) ?? scenes[0] ?? null;
   applyScene(scene);
+  renderProps();
 
   syncActors(state.agents);
 
@@ -596,10 +823,17 @@ function paintPortrait(node, agent) {
   node.textContent = agent?.emoji || "🤖";
 }
 
+/** Frame count + fps of the sheet an agent renders with, for change detection. */
+function animSignature(agent) {
+  const { asset } = characterImage(agent);
+  return `${asset?.frames ?? 1}:${asset?.fps ?? 0}`;
+}
+
 function buildActor(agent) {
   const actor = el("div", "actor");
   actor.dataset.id = agent.id;
   actor.dataset.sprite = agent.sprite ?? "";
+  actor.dataset.anim = animSignature(agent);
   actor.__target = { x: agent.x, y: agent.y };
   actor.setAttribute("role", "button");
   actor.setAttribute("tabindex", "0");
@@ -616,12 +850,12 @@ function buildActor(agent) {
   if (image) {
     const sprite = el("div", "actor-sprite");
     sprite.style.backgroundImage = `url("${image}")`;
+    // The sheet only plays while the character walks; standing still shows the
+    // first frame instead of flickering through every pose.
     const frames = Math.max(1, asset?.frames ?? 1);
-    if (frames > 1) {
-      const fps = (asset?.fps || 6) > 0 ? asset.fps || 6 : 6;
-      sprite.style.setProperty("--frames", String(frames));
-      sprite.style.animation = `sprite-play ${Math.round((1000 / fps) * frames)}ms steps(${frames}, end) infinite`;
-    }
+    sprite.style.setProperty("--frames", String(frames));
+    sprite.dataset.frames = String(frames);
+    sprite.dataset.fps = String(asset?.fps ?? 0);
     avatar.classList.add("sprite");
     avatar.append(sprite);
   } else {
@@ -703,7 +937,10 @@ function syncActors(list) {
       continue;
     }
     existing.delete(agent.id);
-    if (current.dataset.sprite !== (agent.sprite ?? "")) {
+    if (
+      current.dataset.sprite !== (agent.sprite ?? "") ||
+      current.dataset.anim !== animSignature(agent)
+    ) {
       current.replaceWith(buildActor(agent));
       continue;
     }
@@ -721,6 +958,19 @@ function syncActors(list) {
 
 const walks = new WeakMap();
 
+/** Runs or stops the walk cycle on one character's sprite sheet. */
+function setWalkAnim(actor, on) {
+  const sprite = actor.querySelector(".actor-sprite");
+  if (!sprite) return;
+  const frames = Number(sprite.dataset.frames || 1);
+  const fps = Number(sprite.dataset.fps || 0);
+  if (!on || frames <= 1 || fps <= 0) {
+    sprite.style.animation = "";
+    return;
+  }
+  sprite.style.animation = `sprite-play ${Math.round((1000 / fps) * frames)}ms steps(${frames}, end) infinite`;
+}
+
 /** Cancel a walk in progress so dragging stays direct. */
 function stopWalk(actor) {
   const walk = walks.get(actor);
@@ -728,6 +978,7 @@ function stopWalk(actor) {
   if (walk.frame) cancelAnimationFrame(walk.frame);
   walks.delete(actor);
   actor.style.transform = "";
+  setWalkAnim(actor, false);
   actor.classList.remove("walking");
 }
 
@@ -761,6 +1012,9 @@ function walkActor(actor, x, y) {
   // Long walks take longer, but never crawl.
   const duration = clamp(340 + distance * 32, 340, 1400);
   const started = performance.now();
+  // Face the way it is going: -1 walks left, 1 walks right.
+  actor.style.setProperty("--face", x < from.x ? "-1" : "1");
+  setWalkAnim(actor, true);
   actor.classList.add("walking");
   const step = (now) => {
     const elapsed = now - started;
@@ -781,6 +1035,7 @@ function walkActor(actor, x, y) {
     walk.frame = 0;
     actor.style.transform = "";
     actor.classList.remove("walking");
+    setWalkAnim(actor, false);
   };
   walk.frame = requestAnimationFrame(step);
 }
@@ -999,14 +1254,21 @@ function selectionField(labelText, name, items, selected) {
  * Per-tool bans inside plugins the agent may use: "you can reach the phone,
  * but never write a file there". Enforced at invoke time by the gateway.
  */
-function denyToolField(agent) {
+/**
+ * Fills the allow list from the machines that are installed right now. `decide`
+ * answers "may this agent call that tool?", so the first render can use the deny
+ * list and a refresh can keep whatever the operator has already ticked.
+ */
+function fillAllowList(wrap, decide) {
+  wrap.innerHTML = "";
   const entries = Object.entries(state.extensions.pluginTools ?? {}).filter(
     ([, tools]) => Array.isArray(tools) && tools.length > 0,
   );
-  if (entries.length === 0) return formField("ห้ามใช้ tool", el("p", "hint", "ยังไม่มี tool จากปลั๊กอิน"));
+  if (entries.length === 0) {
+    wrap.append(el("p", "hint", "ยังไม่มีเครื่องที่ติดตั้งไว้ — กดเพิ่มเครื่องด้านล่างได้เลย"));
+    return;
+  }
 
-  const wrap = el("div", "selection");
-  const denied = agent?.denyTools ?? [];
   for (const [plugin, tools] of entries) {
     const group = el("div", "deny-group");
     group.append(el("p", "hint", plugin));
@@ -1015,17 +1277,63 @@ function denyToolField(agent) {
       const label = el("label", "check");
       const box = document.createElement("input");
       box.type = "checkbox";
-      box.name = "agent-deny";
+      box.name = "agent-allow";
       box.value = tool;
-      box.checked = denied.includes(tool);
+      box.checked = decide(tool);
       label.append(box, el("span", null, tool));
       list.append(label);
     }
     group.append(list);
     wrap.append(group);
   }
-  wrap.append(el("p", "hint", "ติ๊กไว้ = agent ตัวนี้เรียก tool นั้นไม่ได้เลย แม้จะได้ปลั๊กอินอยู่"));
-  return formField("ห้ามใช้ tool", wrap);
+}
+
+function denyToolField(agent) {
+  /* Positive framing on purpose: a tick means "this agent may call it".
+     The stored field is still the deny list (agents.json -> denyTools), so
+     unticked tools are written there on save. */
+  const host = el("div", "field");
+  host.id = "agent-tools-field";
+  host.append(el("span", null, "TOOL ที่ใช้ได้ (ติ๊ก = อนุญาต)"));
+
+  const wrap = el("div", "selection");
+  const denied = agent?.denyTools ?? [];
+  fillAllowList(wrap, (tool) => !denied.includes(tool));
+  host.append(wrap);
+
+  // Adding a machine is data, not code: this jumps to the machines sheet, which
+  // writes a plugin folder and reloads extensions by itself.
+  const addMachine = el("button", "ghost wide", "＋ เพิ่มเครื่อง / IP ใหม่");
+  addMachine.type = "button";
+  addMachine.addEventListener("click", () => {
+    closeAgentSheet();
+    openTargetsSheet();
+  });
+  host.append(addMachine);
+
+  host.append(
+    el(
+      "p",
+      "hint",
+      "ติ๊ก = ใช้ได้ · เอาติ๊กออก = ห้ามใช้ tool นั้น (ยังเห็นปลั๊กอินอยู่ แต่เรียกไม่ได้) · เพิ่มเครื่องแล้วรายการนี้จะอัปเดตให้เอง",
+    ),
+  );
+  return host;
+}
+
+/** Keeps the sheet open and current when a machine is added or removed elsewhere. */
+function refreshAgentTools() {
+  const host = document.getElementById("agent-tools-field");
+  const wrap = host?.querySelector(".selection");
+  if (!wrap) return;
+
+  const known = new Set([...wrap.querySelectorAll('input[name="agent-allow"]')].map((box) => box.value));
+  const ticked = new Set(
+    [...wrap.querySelectorAll('input[name="agent-allow"]:checked')].map((box) => box.value),
+  );
+  // Tools that were already on screen keep the operator's choice; a brand new
+  // machine arrives allowed, which matches the default for an agent.
+  fillAllowList(wrap, (tool) => (known.has(tool) ? ticked.has(tool) : true));
 }
 
 function openAgentSheet(id) {
@@ -1056,8 +1364,20 @@ function renderAgentForm(agent) {
   nameRow.append(emojiWrap);
   form.append(nameRow);
 
+  // Role, reply prefix and identity are separate boxes on purpose: role is the
+  // one-line title, the prefix is the exact greeting, identity is the free text.
   form.append(
-    formField("บทบาท", textInput("agent-role", agent?.role ?? "", { placeholder: "เช่น นักเขียนคอนเทนต์" })),
+    formField("บทบาท (ROLE) — บรรทัดเดียว", textInput("agent-role", agent?.role ?? "", { placeholder: "เช่น Agency Director / Grand Strategist" })),
+  );
+
+  form.append(
+    formField(
+      "คำนำหน้าตอบ (reply prefix)",
+      textInput("agent-reply-prefix", agent?.replyPrefix ?? "", {
+        placeholder: "เช่น เคบั๊บ..บอส!! ☄️",
+        maxLength: 80,
+      }),
+    ),
   );
 
   const modelOptions = [
@@ -1078,8 +1398,8 @@ function renderAgentForm(agent) {
 
   form.append(
     formField(
-      "ตัวตน / บุคลิก (identity)",
-      textArea("agent-identity", agent?.identity ?? "", "เขียนบุคลิก วิธีพูด และสิ่งที่ห้ามทำ"),
+      "ตัวตน / บุคลิก (IDENTITY) — หน้าที่ กติกา วิธีพูด",
+      textArea("agent-identity", agent?.identity ?? "", "เขียนบทบาท หน้าที่ ข้อห้าม และโทนการพูด (ไม่ต้องใส่คำนำหน้าตอบ ซ้ำ)"),
     ),
   );
 
@@ -1110,6 +1430,7 @@ function readAgentForm() {
     name: val("agent-name").trim(),
     emoji: val("agent-emoji").trim(),
     role: val("agent-role").trim(),
+    replyPrefix: val("agent-reply-prefix").trim() || null,
     model: val("agent-model") || null,
     color: val("agent-color") || null,
     sprite: val("agent-sprite") || null,
@@ -1117,8 +1438,18 @@ function readAgentForm() {
     skills: selection("skill"),
     plugins: selection("plugin"),
     mcp: selection("mcp"),
-    denyTools: checked("agent-deny"),
+    denyTools: denyFromAllowed(checked("agent-allow")),
   };
+}
+
+/** Unticked tools (plus any deny entry left over from a removed plugin) become denyTools. */
+function denyFromAllowed(allowed) {
+  const installed = Object.values(state.extensions.pluginTools ?? {}).flat();
+  const known = new Set(installed);
+  const existing = findAgent(state.sheetAgentId)?.denyTools ?? [];
+  const leftover = existing.filter((tool) => !known.has(tool));
+  const unchecked = installed.filter((tool) => !allowed.includes(tool));
+  return [...new Set([...leftover, ...unchecked])];
 }
 
 function saveAgent() {
@@ -1482,6 +1813,13 @@ function applyAgentState(frame) {
   if (frame.office && Array.isArray(frame.office.scenes)) state.office = frame.office;
   if (frame.extensions) state.extensions = frame.extensions;
 
+  // A machine was added or removed: refresh the open agent sheet's tool list.
+  const toolsSig = JSON.stringify(Object.entries(state.extensions.pluginTools ?? {}));
+  if (toolsSig !== lastPluginToolsSig) {
+    lastPluginToolsSig = toolsSig;
+    refreshAgentTools();
+  }
+
   if (state.scene == null && (state.office.scenes ?? []).length > 0) {
     state.scene = state.office.scenes[0].id;
   }
@@ -1493,13 +1831,15 @@ function applyAgentState(frame) {
 }
 
 function handleFrame(frame) {
-  if (frame.type === "target.saved") window.__lastSavedFrame = frame;
+
   switch (frame.type) {
     case "ready": {
       els.login.hidden = true;
       state.tools = frame.tools ?? [];
       els.toolList.textContent = `tools: ${state.tools.join(", ") || "none"}`;
       if (frame.extensions) state.extensions = frame.extensions;
+      if (frame.ui) state.ui = frame.ui;
+      applyUi();
       state.extensionWrites = frame.extensionWrites ?? state.extensionWrites;
       renderExtensions(frame.diagnostics ?? []);
       renderApprovals(frame.approvals ?? []);
@@ -1520,6 +1860,15 @@ function handleFrame(frame) {
       send({ type: "sessions.list" });
       send({ type: "session.history", sessionId: state.sessionId });
       send({ type: "approvals.list" });
+      break;
+    }
+
+    case "ui.state": {
+      if (frame.ui) state.ui = frame.ui;
+      if (frame.office && Array.isArray(frame.office.scenes)) state.office = frame.office;
+      applyUi();
+      renderOffice();
+      if (els.studioSheet?.classList.contains("open")) renderStudio();
       break;
     }
 
@@ -1745,6 +2094,7 @@ els.input.addEventListener("input", () => {
 });
 
 els.talkClose.addEventListener("click", hideTalk);
+els.chatClose.addEventListener("click", () => setView("office"));
 els.chatAlpha?.addEventListener("click", cycleDialogAlpha);
 els.talkAlpha?.addEventListener("click", cycleDialogAlpha);
 try {
@@ -1775,6 +2125,8 @@ els.agentSave.addEventListener("click", saveAgent);
 els.approvalsBtn.addEventListener("click", openApprovalSheet);
 els.approvalSheetClose.addEventListener("click", closeApprovalSheet);
 els.targetsBtn?.addEventListener("click", openTargetsSheet);
+els.studioBtn?.addEventListener("click", openStudio);
+els.studioClose?.addEventListener("click", closeStudio);
 els.targetsSheetClose?.addEventListener("click", closeTargetsSheet);
 els.targetSave?.addEventListener("click", saveTarget);
 els.targetNew?.addEventListener("click", () => {

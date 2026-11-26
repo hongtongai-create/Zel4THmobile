@@ -17,3 +17,13 @@ clawgate.tar.gz
 sites/download/public/*.zip
 sites/download/public/*.tar.gz
 gateway.log
+
+# OS + tooling noise
+.DS_Store
+.cloud-attachments/
+
+# local screenshots taken during testing live at the repo root
+/*.png
+
+# plugins the gateway archived instead of deleting
+extensions/plugins/.removed/

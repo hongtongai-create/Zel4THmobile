@@ -3,6 +3,8 @@ import type { Logger } from "../log.js";
 import type { ToolDefinition } from "../models.js";
 import { createDelegateTool } from "./delegate.js";
 import { createFacebookTool } from "./facebook.js";
+import { createImageTool } from "./image.js";
+import { createVideoTool } from "./video.js";
 
 export type ToolContext = {
   sessionId: string;
@@ -133,6 +135,8 @@ export class ToolRegistry {
 export function createToolRegistry(config: Config): ToolRegistry {
   const registry = new ToolRegistry();
   if (config.facebook) registry.register(createFacebookTool(config.facebook));
+  if (config.images) registry.register(createImageTool(config.images));
+  if (config.videos) registry.register(createVideoTool(config.videos));
   registry.register(createDelegateTool());
   return registry;
 }

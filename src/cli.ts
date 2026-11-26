@@ -96,7 +96,7 @@ async function runUsage(): Promise<void> {
   const summary: UsageSummary = ledger.summary();
 
   if (summary.total.turns === 0) {
-    console.log("No usage recorded yet. Run `clawgate gateway` or `clawgate chat` first.");
+    console.log("No usage recorded yet. Run `zel4thmobile gateway` or `zel4thmobile chat` first.");
     return;
   }
 
@@ -166,7 +166,7 @@ async function runGateway(): Promise<void> {
   const port = await gateway.start();
 
   console.log("");
-  console.log(`  clawgate gateway listening on http://${config.host}:${port}`);
+  console.log(`  zel4thmobile gateway listening on http://${config.host}:${port}`);
   console.log(`  board:  http://localhost:${port}/?token=${encodeURIComponent(config.gatewayToken)}`);
   console.log(`  socket: ws://localhost:${port}/ws`);
   if (config.line) {
@@ -227,7 +227,7 @@ async function runChat(): Promise<void> {
 
   const sessionId = "cli:main";
   const session = await harness.store.getOrCreate(sessionId, "cli", catalog.defaultRef() ?? "");
-  console.log(`clawgate chat - session ${sessionId}, model ${session.model}`);
+  console.log(`zel4thmobile chat - session ${sessionId}, model ${session.model}`);
   console.log("commands: /model <ref>, /models, /reset, /exit\n");
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -335,7 +335,7 @@ async function runExtensions(args: string[]): Promise<void> {
     case "install": {
       const name = args[1]?.trim();
       if (!name) {
-        console.error("usage: clawgate extensions install <name>");
+        console.error("usage: zel4thmobile extensions install <name>");
         process.exit(1);
       }
       const installed = await hub.installByName(name);
@@ -346,7 +346,7 @@ async function runExtensions(args: string[]): Promise<void> {
     case "remove": {
       const name = args[1]?.trim();
       if (!name) {
-        console.error("usage: clawgate extensions remove <name>");
+        console.error("usage: zel4thmobile extensions remove <name>");
         process.exit(1);
       }
       const kind = await hub.remove(name);
@@ -357,24 +357,24 @@ async function runExtensions(args: string[]): Promise<void> {
       console.log(`unknown extensions action "${action}"
 
 usage:
-  clawgate extensions            list installed skills, plugins and MCP servers
-  clawgate extensions search Q   search the clawhub registry
-  clawgate extensions diagnostics  why each plugin/skill is loaded, skipped or failed
-  clawgate extensions install N  install one (skill, plugin or mcp)
-  clawgate extensions remove N   remove one`);
+  zel4thmobile extensions            list installed skills, plugins and MCP servers
+  zel4thmobile extensions search Q   search the clawhub registry
+  zel4thmobile extensions diagnostics  why each plugin/skill is loaded, skipped or failed
+  zel4thmobile extensions install N  install one (skill, plugin or mcp)
+  zel4thmobile extensions remove N   remove one`);
       process.exit(1);
   }
 }
 
 function printHelp(): void {
-  console.log(`clawgate - agent harness
+  console.log(`zel4thmobile - agent harness
 
 usage:
-  clawgate gateway     start the board + websocket gateway (+ telegram if configured)
-  clawgate chat        terminal chat with the agent
-  clawgate models      list configured models
-  clawgate usage       token usage and estimated cost per model and per provider
-  clawgate extensions  list/search/install/remove skills, plugins and MCP servers
+  zel4thmobile gateway     start the board + websocket gateway (+ telegram if configured)
+  zel4thmobile chat        terminal chat with the agent
+  zel4thmobile models      list configured models
+  zel4thmobile usage       token usage and estimated cost per model and per provider
+  zel4thmobile extensions  list/search/install/remove skills, plugins and MCP servers
 
 environment: see .env.example (GATEWAY_TOKEN is required)`);
 }

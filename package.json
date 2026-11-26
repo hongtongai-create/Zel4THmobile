@@ -1,9 +1,9 @@
 {
-  "name": "clawgate",
-  "version": "0.1.6",
+  "name": "zel4thmobile",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Openclaw-style agent harness: model selection, Telegram channel, Facebook posting, token-authenticated WebSocket gateway + board.",
+  "description": "Zel4THmobile: model selection, Telegram channel, Facebook posting, token-authenticated WebSocket gateway + board.",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -28,5 +28,9 @@
     "@types/ws": "^8.5.13",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "bin": {
+    "zel4thmobile": "dist/cli.js",
+    "clawgate": "dist/cli.js"
   }
 }

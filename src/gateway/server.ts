@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, statSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import type { Duplex } from "node:stream";
@@ -20,6 +21,7 @@ import {
 } from "../extensions/targets.js";
 import type { Logger } from "../log.js";
 import { loadOfficeAssets, type OfficeAssets } from "../office.js";
+import { loadOfficeUiSync, sanitizeOfficeUi, saveOfficeUi, type OfficeUi } from "../office-ui.js";
 import type { AgentEvent, SessionChannel } from "../types.js";
 
 /** Where two characters stand when work is handed over (percent of the scene frame). */
@@ -42,6 +44,7 @@ const MIME: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".ico": "image/x-icon",
+  ".glb": "model/gltf-binary",
   ".mp3": "audio/mpeg",
   ".ogg": "audio/ogg",
   ".zip": "application/zip",
@@ -93,6 +96,24 @@ async function readBody(req: import("node:http").IncomingMessage): Promise<Buffe
   return Buffer.concat(chunks);
 }
 
+/** Raw-body upload reader with its own (larger) ceiling than the webhook reader. */
+const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+
+async function readUpload(req: import("node:http").IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+    size += buffer.length;
+    if (size > MAX_UPLOAD_BYTES) throw new Error("ไฟล์ใหญ่เกิน 12 MB");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+const UPLOAD_IMAGE_EXT = new Set([".svg", ".png", ".webp", ".jpg", ".jpeg", ".gif", ".avif"]);
+const UPLOAD_KINDS: Record<string, string> = { scenes: "scenes", characters: "characters", props: "props" };
+
 export function createGateway(options: GatewayOptions) {
   const { config, harness, log, approvals, line } = options;
   const agents = options.agents ?? new AgentRegistry(config.dataDir);
@@ -127,13 +148,27 @@ export function createGateway(options: GatewayOptions) {
   }
 
   /** Full agent + office state, broadcast after any agent or scene change. */
+  // Theme, sizes and stage props live outside agents.json: they are shared by
+  // every profile and apply to the board, not to an agent.
+  let officeUi: OfficeUi = loadOfficeUiSync(config.dataDir);
+
   async function agentsState() {
     const [profiles, assets] = await Promise.all([agents.list(), officeAssets()]);
+    // Frame counts set in the studio win over the sheet's own defaults, so an
+    // uploaded walk cycle animates without editing office.json.
+    const office = {
+      ...assets,
+      characters: assets.characters.map((entry) => {
+        const anim = officeUi.characters?.[entry.id];
+        return anim ? { ...entry, frames: anim.frames, fps: anim.fps } : entry;
+      }),
+    };
     return {
       type: "agents.state",
       agents: profiles,
       scene: agents.scene,
-      office: assets,
+      office,
+      ui: officeUi,
       extensions: harness.extensions?.summary() ?? null,
     };
   }
@@ -261,6 +296,20 @@ export function createGateway(options: GatewayOptions) {
         case "agents.list":
           send(socket, await agentsState());
           return;
+
+        case "ui.get": {
+          send(socket, { type: "ui.state", ui: officeUi, office: await officeAssets() });
+          return;
+        }
+
+        case "ui.update": {
+          officeUi = sanitizeOfficeUi(msg.ui, officeUi);
+          saveOfficeUi(config.dataDir, officeUi);
+          broadcast({ type: "ui.state", ui: officeUi });
+          // Character frame counts change the sprite sheets every board renders.
+          await broadcastAgents();
+          return;
+        }
 
         case "agent.create": {
           await agents.create(msg);
@@ -493,6 +542,7 @@ export function createGateway(options: GatewayOptions) {
           agents: state.agents,
           scene: state.scene,
           office: state.office,
+          ui: officeUi,
         });
       } catch (error) {
         log.warn(`could not greet board client: ${(error as Error).message}`);
@@ -581,6 +631,61 @@ export function createGateway(options: GatewayOptions) {
           approvals: approvals?.list().length ?? 0,
         }),
       );
+      return;
+    }
+
+    // Art upload goes straight into board/assets/<kind>/, which the office asset
+    // scan already reads, so a new scene or character needs no code change.
+    if (url.pathname === "/api/assets" && req.method === "POST") {
+      void (async () => {
+        const token = bearer(req.headers.authorization) || (url.searchParams.get("token") ?? "");
+        if (!safeEqual(token, config.gatewayToken)) {
+          res.writeHead(401, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+          return;
+        }
+        const kind = (url.searchParams.get("kind") ?? "").toLowerCase();
+        const folder = UPLOAD_KINDS[kind];
+        if (!folder) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "kind must be scenes, characters or props" }));
+          return;
+        }
+        const original = url.searchParams.get("name") ?? "";
+        const ext = path.extname(original).toLowerCase();
+        const allowed = kind === "props" ? new Set([...UPLOAD_IMAGE_EXT, ".glb"]) : UPLOAD_IMAGE_EXT;
+        if (!allowed.has(ext)) {
+          res.writeHead(415, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: `นามสกุล ${ext || "(ไม่มี)"} ไม่รองรับ` }));
+          return;
+        }
+        const base = path
+          .basename(original, ext)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 48);
+        const file = `${base || "upload"}-${Date.now().toString(36)}${ext}`;
+        const bytes = await readUpload(req);
+        if (bytes.length === 0) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "ไฟล์ว่าง" }));
+          return;
+        }
+        const target = path.join(config.boardDir, "assets", folder, file);
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, bytes);
+        // New art has to reach open boards without a reload.
+        await broadcastAgents();
+        const image = `/assets/${folder}/${encodeURIComponent(file)}`;
+        log.info(`uploaded ${kind}/${file} (${Math.round(bytes.length / 1024)} KB)`);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, image, kind, bytes: bytes.length }));
+      })().catch((error: Error) => {
+        log.warn(`upload failed: ${error.message}`);
+        if (!res.headersSent) res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: error.message }));
+      });
       return;
     }
 

@@ -1,4 +1,8 @@
-# clawgate
+![Zel4THmobile](board/assets/brand/logo-icon.png)
+
+# Zel4THmobile
+
+> **คู่มือใช้งานทีละขั้น (ติดตั้ง → สร้าง agent → คุมเครื่องอื่น → สตูดิโอ → สร้างภาพ/วิดีโอ): [docs/USAGE.md](docs/USAGE.md)**
 
 Agent harness สไตล์ Openclaw — เลือก model ได้, คุยผ่าน Telegram, สั่งให้โพสต์ Facebook ได้เอง
 และมี **board** (หน้าเว็บควบคุม) ที่ต่อผ่าน **gateway token + WebSocket**
@@ -23,7 +27,7 @@ Board(WS)─┘        │
 | `src/extensions/approvals.ts` | คิวอนุมัติสำหรับการติดตั้ง/ถอน/รีโหลด extension ที่ agent ขอ |
 | `src/gateway/server.ts` | HTTP + WebSocket gateway (ตรวจ token ก่อน upgrade) และเสิร์ฟ board |
 | `src/store.ts` | เก็บ session เป็นไฟล์ JSON ใน `data/sessions/` |
-| `src/usage.ts` | บันทึก token ต่อ turn และประมาณค่าใช้จ่ายต่อ model/provider (`data/usage.jsonl` + `clawgate usage`) |
+| `src/usage.ts` | บันทึก token ต่อ turn และประมาณค่าใช้จ่ายต่อ model/provider (`data/usage.jsonl` + `zel4thmobile usage`) |
 | `board/` | board UI แบบ mobile-first (vanilla JS) ต่อ WebSocket, เลือก model, ดู tool call แบบสด |
 | `board/manifest.webmanifest`, `board/sw.js`, `board/icons/` | ทำให้ board ติดตั้งเป็นแอพได้ (PWA) |
 | `scripts/make-icons.mjs` | สร้างไอคอน PNG ทั้งชุดโดยไม่ต้องพึ่ง library ภายนอก (`npm run icons`) |
@@ -41,7 +45,7 @@ npm run dev           # = tsx src/cli.ts gateway
 จะได้ log แบบนี้ — เปิดลิงก์ board ได้เลย (token ถูกฝังใน URL แล้ว):
 
 ```
-clawgate gateway listening on http://0.0.0.0:8787
+zel4thmobile gateway listening on http://0.0.0.0:8787
 board:  http://localhost:8787/?token=...
 socket: ws://localhost:8787/ws
 ```
@@ -182,6 +186,49 @@ FACEBOOK_PAGE_NAME=My Page          # ใช้แสดงใน prompt ให�
 token อยู่ฝั่ง server เท่านั้น ไม่เคยถูกส่งเข้า model
 
 ทดสอบ: ส่งใน Telegram ว่า `โพสต์เพจว่าวันนี้ร้านเปิด 10:00-20:00` แล้วดู tool call ใน board
+
+## สร้างภาพ (image generation)
+
+agent สร้างภาพเองได้ผ่าน tool `image_generate` — เรียก endpoint แบบ OpenAI-compatible
+(`POST {IMAGE_BASE_URL}/images/generations`) แล้วบันทึกไฟล์ลงเครื่อง
+
+```bash
+IMAGE_API_KEY=sk-...                       # เว้นว่าง = ใช้ OPENAI_API_KEY
+IMAGE_BASE_URL=https://api.openai.com/v1   # เว้นว่าง = ใช้ OPENAI_BASE_URL
+IMAGE_MODEL=gpt-image-1                    # หรือ dall-e-3 / model ของผู้ให้บริการที่รองรับ
+IMAGE_SIZE=1024x1024
+IMAGE_DIR=data/images                      # ที่เก็บไฟล์ เริ่มต้นคือ <DATA_DIR>/images
+```
+
+- ไม่ตั้งคีย์ = tool ไม่ถูก register เลย agent จึงไม่สามารถอ้างว่าสร้างภาพได้
+- คีย์อยู่ฝั่ง server เท่านั้น ไม่เคยถูกส่งเข้า model
+- tool คืน **path ของไฟล์ที่บันทึกแล้ว** agent จึงส่งต่อให้คนอื่น (หรือใช้ tool อื่นต่อ) ได้จริง
+- ตั้ง `IMAGE_MODEL` เป็น `dall-e-*` เมื่อ endpoint ต้องการ `response_format: b64_json`
+
+ตัวอย่าง: "วาดภาพแมวส้มนอนบนMacBook แล้วเซฟไว้" → agent เรียก
+`{"prompt":"...","size":"1536x1024"}` แล้วตอบกลับพร้อม path
+
+## สร้างวิดีโอ (video generation)
+
+agent สร้างวิดีโอสั้นเองได้ผ่าน tool `video_generate` — ใช้ API แบบ **async task**
+(`POST <tasks>` → ได้ id → `GET <tasks>/<id>` จนสถานะ `succeeded` → ดาวน์โหลด `video_url`)
+
+```bash
+VIDEO_BASE_URL=https://ark.ap-southeast.bytepluses.com/api/v3
+VIDEO_TASKS_URL=https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks
+VIDEO_MODEL=seedance-1-0-pro-250528
+VIDEO_RESOLUTION=720p                                # 480p / 720p / 1080p
+VIDEO_RATIO=16:9
+VIDEO_DURATION=5                                     # วินาที
+VIDEO_DIR=data/videos
+VIDEO_TIMEOUT_MS=600000                              # เพดานเวลารอ render
+```
+
+- ไม่ตั้งคีย์ = tool ไม่ถูก register (คีย์ fallback: `VIDEO_API_KEY` → `IMAGE_API_KEY` → `OPENAI_API_KEY`)
+- `VIDEO_BASE_URL` ใช้ร่วมกับ image ได้ เพราะ Ark ให้บริการทั้งคู่ที่ `/api/v3`
+- `VIDEO_TASKS_URL` ใส่ URL เต็มได้เลย และโค้ดจะไม่ต่อ path ซ้ำ
+- tool จะ poll ทุก 5 วินาที, ดาวน์โหลดไฟล์ `.mp4` เก็บไว้แล้วคืน **absolute path**
+- ลิงก์ `video_url` ของผู้ให้บริการหมดอายุใน 24 ชั่วโมง — tool จึงโหลดเก็บทันที
 
 ## ใช้บนมือถือ / ติดตั้งเป็นแอพ
 
@@ -624,7 +671,7 @@ health/board assets, การปฏิเสธ token ผิด, การร�
 ## Agents and the office view
 
 The board is not one assistant anymore: it is a small office of agents. Each agent is a
-profile in `data/agents.json` (no database) with its own name, emoji, role, identity text,
+profile in `data/agents.json` (no database) with its own name, emoji, role, reply prefix, identity text,
 default model, character sprite, position on the stage, and its own allowlist of skills,
 plugins and MCP servers.
 
@@ -647,7 +694,7 @@ Everything else about an agent is editable in the UI.
 | frame | direction | meaning |
 | --- | --- | --- |
 | `ready` | server → client | now also carries `agents`, `scene` and `office` (scenes + characters) |
-| `agent.create` | client → server | `{ name, emoji, role, identity, model, color, sprite }` |
+| `agent.create` | client → server | `{ name, emoji, role, replyPrefix, identity, model, color, sprite }` |
 | `agent.update` | client → server | `{ id, ...any of the fields above, x, y, skills, plugins, mcp }` |
 | `agent.delete` | client → server | `{ id }` |
 | `office.scene` | client → server | `{ scene }` |

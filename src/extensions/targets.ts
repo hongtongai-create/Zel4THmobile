@@ -179,10 +179,8 @@ export async function saveTarget(pluginsDir: string, input: TargetInput): Promis
     prefix = nickname;
   }
 
-  // Two machines must not share a tool prefix; a prefix is really the unit of
-  // invitations in an agent's allowlist, so duplicate prefixes would collide in
-  // the tool registry. Keep a single machine per host too, so the board can
-  // re-save the same IP without accidentally standing up a second plugin.
+  // Two machines must not share a tool prefix; a prefix is the unit of the
+  // agent allowlist, so duplicate prefixes would collide in the tool registry.
   const prefixClash = existingTargets.find(
     (target) => target.prefix === prefix && target.plugin !== known?.plugin,
   );

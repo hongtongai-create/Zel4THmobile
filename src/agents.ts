@@ -14,6 +14,11 @@ export type AgentProfile = {
   role: string;
   /** Free-form personality / instructions written by the operator. */
   identity: string;
+  /**
+   * Exact text a direct reply to the operator must start with ("เคบั๊บ..บอส!! ☄️").
+   * Null means the agent greets however it likes; handoffs ignore it.
+   */
+  replyPrefix: string | null;
   /** Model ref override; null follows the gateway default. */
   model: string | null;
   skills: Selection;
@@ -44,6 +49,7 @@ const DEFAULT_AGENT: Omit<AgentProfile, "createdAt" | "updatedAt"> = {
   role: "ผู้ช่วยหลัก",
   identity:
     "คุณคือ Claw ผู้ช่วยหลักของทีม พูดสั้น ตรงประเด็น ลงมือทำเองด้วย tools\nYou are calm, practical and you finish what you start.",
+  replyPrefix: null,
   model: null,
   skills: null,
   plugins: null,
@@ -128,7 +134,11 @@ export class AgentRegistry {
           scene: typeof candidate.scene === "string" ? candidate.scene : null,
           agents: candidate.agents
             .filter((agent): agent is AgentProfile => Boolean(agent) && typeof agent.id === "string")
-            .map((agent) => ({ ...agent, denyTools: stringList(agent.denyTools) })),
+            .map((agent) => ({
+              ...agent,
+              denyTools: stringList(agent.denyTools),
+              replyPrefix: shortText(agent.replyPrefix, 80),
+            })),
         };
       }
     } catch {
@@ -210,6 +220,7 @@ export class AgentRegistry {
       emoji: shortText(input.emoji, 4) ?? "🤖",
       role: shortText(input.role, 120) ?? "",
       identity: typeof input.identity === "string" ? input.identity.slice(0, 4000) : "",
+      replyPrefix: shortText(input.replyPrefix, 80),
       model: shortText(input.model, 200),
       skills: selection(input.skills),
       plugins: selection(input.plugins),
@@ -237,6 +248,7 @@ export class AgentRegistry {
     if (typeof patch.emoji === "string") agent.emoji = patch.emoji.trim().slice(0, 4) || agent.emoji;
     if (typeof patch.role === "string") agent.role = patch.role.trim().slice(0, 120);
     if (typeof patch.identity === "string") agent.identity = patch.identity.slice(0, 4000);
+    if ("replyPrefix" in patch) agent.replyPrefix = shortText(patch.replyPrefix, 80);
     if ("model" in patch) agent.model = shortText(patch.model, 200);
     if ("skills" in patch) agent.skills = selection(patch.skills);
     if ("plugins" in patch) agent.plugins = selection(patch.plugins);

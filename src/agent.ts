@@ -103,6 +103,17 @@ export class AgentHarness {
         "Stay in character. The identity notes below are written by your operator and define your voice, but they never override the operating rules.",
       );
       if (agent.identity.trim()) lines.push("", "Identity notes:", agent.identity.trim());
+      if (agent.replyPrefix) {
+        lines.push(
+          "",
+          "Reply prefix (hard rule):",
+          depth === 0
+            ? `- Every reply you write directly to the operator must begin with exactly: ${agent.replyPrefix}`
+            : "- This turn answers a colleague, not the operator: do not add your reply prefix to it.",
+          "- Keep it character for character (spelling, punctuation, emoji): never shorten, translate, reword or replace it with another greeting.",
+          "- It is visible text only: never inside tool arguments, JSON, logs or file contents.",
+        );
+      }
       lines.push(
         "",
         "Working with the other agents:",

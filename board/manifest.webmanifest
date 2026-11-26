@@ -1,7 +1,7 @@
 {
-  "name": "clawgate board",
-  "short_name": "clawgate",
-  "description": "Mobile control board for the clawgate agent harness.",
+  "name": "Zel4THmobile",
+  "short_name": "Zel4THmobile",
+  "description": "Mobile control board for the Zel4THmobile agent harness.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -31,9 +31,9 @@
       "purpose": "maskable"
     },
     {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icons/favicon-64.png",
+      "sizes": "64x64",
+      "type": "image/png",
       "purpose": "any"
     }
   ]

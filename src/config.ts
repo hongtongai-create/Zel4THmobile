@@ -20,6 +20,30 @@ export type FacebookConfig = {
   graphBaseUrl: string;
 };
 
+export type ImageConfig = {
+  /** OpenAI-compatible base URL that serves `images/generations`. */
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  size: string;
+  /** Where generated files are written (`IMAGE_DIR`, default `data/images`). */
+  outputDir: string;
+};
+
+export type VideoConfig = {
+  /** Full task endpoint, e.g. https://host/api/v3/contents/generations/tasks. */
+  tasksUrl: string;
+  apiKey: string;
+  model: string;
+  resolution: string;
+  ratio: string;
+  duration: number;
+  /** Where downloaded videos are written (`VIDEO_DIR`, default `data/videos`). */
+  outputDir: string;
+  /** How long one render may take before the tool gives up (`VIDEO_TIMEOUT_MS`). */
+  timeoutMs: number;
+};
+
 export type TelegramConfig = {
   botToken: string;
   allowedChatIds: string[];
@@ -46,6 +70,10 @@ export type Config = {
   providers: ProviderConfig[];
   defaultModel: string | null;
   facebook: FacebookConfig | null;
+  /** Present only when an image API key is configured. */
+  images: ImageConfig | null;
+  /** Present only when a video API key is configured. */
+  videos: VideoConfig | null;
   telegram: TelegramConfig | null;
   line: LineConfig | null;
   dataDir: string;
@@ -188,6 +216,43 @@ function buildFacebook(env: NodeJS.ProcessEnv): FacebookConfig | null {
   };
 }
 
+function buildImages(env: NodeJS.ProcessEnv): ImageConfig | null {
+  // Falls back to the OpenAI credentials, so one key can drive chat and images.
+  const apiKey = str(env, "IMAGE_API_KEY") ?? str(env, "OPENAI_API_KEY");
+  if (!apiKey) return null;
+  return {
+    baseUrl:
+      str(env, "IMAGE_BASE_URL") ?? str(env, "OPENAI_BASE_URL") ?? "https://api.openai.com/v1",
+    apiKey,
+    model: str(env, "IMAGE_MODEL") ?? "gpt-image-1",
+    size: str(env, "IMAGE_SIZE") ?? "1024x1024",
+    outputDir: path.resolve(str(env, "IMAGE_DIR") ?? path.join(str(env, "DATA_DIR") ?? "data", "images")),
+  };
+}
+
+function buildVideos(env: NodeJS.ProcessEnv): VideoConfig | null {
+  // Shares the image key and host by default: Ark serves both on /api/v3.
+  const apiKey = str(env, "VIDEO_API_KEY") ?? str(env, "IMAGE_API_KEY") ?? str(env, "OPENAI_API_KEY");
+  if (!apiKey) return null;
+
+  const explicit = str(env, "VIDEO_TASKS_URL");
+  const host = str(env, "VIDEO_BASE_URL") ?? str(env, "IMAGE_BASE_URL") ?? str(env, "OPENAI_BASE_URL");
+  const tasksUrl =
+    explicit ??
+    `${(host ?? "https://api.openai.com/v1").replace(/\/+$/, "").replace(/\/(images|contents)\/.*$/i, "")}/contents/generations/tasks`;
+
+  return {
+    tasksUrl,
+    apiKey,
+    model: str(env, "VIDEO_MODEL") ?? "seedance-1-0-pro-250528",
+    resolution: str(env, "VIDEO_RESOLUTION") ?? "720p",
+    ratio: str(env, "VIDEO_RATIO") ?? "16:9",
+    duration: int(env, "VIDEO_DURATION", 5),
+    outputDir: path.resolve(str(env, "VIDEO_DIR") ?? path.join(str(env, "DATA_DIR") ?? "data", "videos")),
+    timeoutMs: Math.max(30_000, int(env, "VIDEO_TIMEOUT_MS", 600_000)),
+  };
+}
+
 function buildTelegram(env: NodeJS.ProcessEnv): TelegramConfig | null {
   const botToken = str(env, "TELEGRAM_BOT_TOKEN");
   if (!botToken) return null;
@@ -241,6 +306,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     providers,
     defaultModel,
     facebook: buildFacebook(env),
+    images: buildImages(env),
+    videos: buildVideos(env),
     telegram: buildTelegram(env),
     line: buildLine(env),
     dataDir: path.resolve(str(env, "DATA_DIR") ?? "data"),
