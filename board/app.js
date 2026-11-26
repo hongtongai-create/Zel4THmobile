@@ -12,6 +12,8 @@ const els = {
   messages: document.getElementById("messages"),
   empty: document.getElementById("empty"),
   composer: document.getElementById("composer"),
+  chatMic: document.getElementById("chat-mic"),
+  chatSpeak: document.getElementById("chat-speak"),
   input: document.getElementById("input"),
   send: document.getElementById("send"),
   modelBtn: document.getElementById("model-btn"),
@@ -282,11 +284,133 @@ els.messages.addEventListener("scroll", () => {
   state.stickToBottom = distance < 120;
 });
 
-function addBubble(role, text) {
+/* ---------- voice: speech to speech ---------- */
+
+const SPEAK_KEY = "clawgate.voiceSpeak";
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+const voice = {
+  speak: storage.get(SPEAK_KEY) === "1",
+  listening: false,
+  recognition: null,
+  last: "",
+};
+
+/** Prefers a Thai system voice, then any voice the device offers. */
+function pickVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  const thai = voices.filter((entry) => /^th/i.test(entry.lang));
+  return thai[0] ?? voices.find((entry) => /^en/i.test(entry.lang)) ?? null;
+}
+
+function updateVoiceChrome() {
+  const on = voice.speak && "speechSynthesis" in window;
+  els.chatSpeak?.classList.toggle("on", on);
+  els.chatSpeak?.setAttribute("aria-pressed", on ? "true" : "false");
+  if (els.chatSpeak) els.chatSpeak.hidden = !("speechSynthesis" in window);
+}
+
+/** Reads an agent reply aloud, dropping code blocks and markdown noise. */
+function speak(text) {
+  if (!voice.speak || !("speechSynthesis" in window)) return;
+  const clean = String(text ?? "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[`*_#>]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 800);
+  if (!clean) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(clean);
+  const chosen = pickVoice();
+  if (chosen) {
+    utterance.voice = chosen;
+    utterance.lang = chosen.lang;
+  }
+  utterance.rate = 1.05;
+  window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeaking() {
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+
+/** Mic button: listen, put the transcript in the composer, then send it. */
+function toggleListening() {
+  if (!Recognition) {
+    toast("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง ลองใช้ Chrome หรือ Safari เวอร์ชันใหม่");
+    return;
+  }
+  if (voice.listening) {
+    voice.recognition?.stop();
+    return;
+  }
+  stopSpeaking();
+  const recognition = new Recognition();
+  recognition.lang = /^th/i.test(document.documentElement.lang || "") ? "th-TH" : navigator.language || "en-US";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.maxAlternatives = 1;
+
+  let finalText = "";
+  recognition.onresult = (event) => {
+    let interim = "";
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const result = event.results[index];
+      if (result.isFinal) finalText += result[0].transcript;
+      else interim += result[0].transcript;
+    }
+    els.input.value = (finalText || interim).trim();
+  };
+  recognition.onerror = (event) => {
+    if (event.error === "aborted") return;
+    toast(event.error === "not-allowed" ? "ไม่ได้รับอนุญาตให้ใช้ไมโครโฟน" : `ฟังเสียงไม่สำเร็จ: ${event.error}`);
+  };
+  recognition.onend = () => {
+    voice.listening = false;
+    voice.recognition = null;
+    els.chatMic?.classList.remove("listening");
+    const text = els.input.value.trim();
+    if (text && !state.busy) els.composer.requestSubmit();
+  };
+
+  voice.recognition = recognition;
+  voice.listening = true;
+  els.chatMic?.classList.add("listening");
+  try {
+    recognition.start();
+  } catch {
+    voice.listening = false;
+    els.chatMic?.classList.remove("listening");
+  }
+}
+
+function initVoice() {
+  updateVoiceChrome();
+  if (els.chatMic) els.chatMic.hidden = !Recognition;
+  els.chatMic?.addEventListener("click", toggleListening);
+  els.chatSpeak?.addEventListener("click", () => {
+    voice.speak = !voice.speak;
+    storage.set(SPEAK_KEY, voice.speak ? "1" : "0");
+    updateVoiceChrome();
+    if (voice.speak && voice.last) speak(voice.last);
+    else stopSpeaking();
+  });
+  // Voice lists load asynchronously on some browsers.
+  if ("speechSynthesis" in window) window.speechSynthesis.addEventListener?.("voiceschanged", updateVoiceChrome);
+}
+
+function addBubble(role, text, options = {}) {
   hideEmpty();
   const div = el("div", `msg ${role}`, text);
   els.messages.append(div);
   scrollToBottom(role === "user");
+  if (role === "assistant") {
+    voice.last = String(text ?? "");
+    // Replayed history is silent; only fresh replies are spoken.
+    if (options.speak !== false) speak(text);
+  }
   return div;
 }
 
@@ -1966,7 +2090,7 @@ function handleFrame(frame) {
       els.messages.innerHTML = "";
       state.toolChips.clear();
       const visible = (frame.messages ?? []).filter((message) => typeof message.content === "string");
-      for (const message of visible) addBubble(message.role, message.content);
+      for (const message of visible) addBubble(message.role, message.content, { speak: false });
       if (frame.model) setModelChip(frame.model);
       const agent = findAgent(sessionAgentId(frame.sessionId));
       setChatHeader(agent ? agent.name : "แชท", null);
@@ -2118,6 +2242,7 @@ els.loginForm.addEventListener("submit", (event) => {
 
 els.composer.addEventListener("submit", (event) => {
   event.preventDefault();
+  stopSpeaking();
   const text = els.input.value.trim();
   if (!text || state.busy) return;
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
@@ -2145,7 +2270,10 @@ els.input.addEventListener("input", () => {
 });
 
 els.talkClose.addEventListener("click", hideTalk);
-els.chatClose.addEventListener("click", () => setView("office"));
+els.chatClose.addEventListener("click", () => {
+  stopSpeaking();
+  setView("office");
+});
 els.chatAlpha?.addEventListener("click", cycleDialogAlpha);
 els.talkAlpha?.addEventListener("click", cycleDialogAlpha);
 try {
@@ -2178,6 +2306,7 @@ els.approvalSheetClose.addEventListener("click", closeApprovalSheet);
 els.targetsBtn?.addEventListener("click", openTargetsSheet);
 els.studioBtn?.addEventListener("click", openStudio);
 els.studioClose?.addEventListener("click", closeStudio);
+initVoice();
 els.targetsSheetClose?.addEventListener("click", closeTargetsSheet);
 els.targetSave?.addEventListener("click", saveTarget);
 els.targetNew?.addEventListener("click", () => {

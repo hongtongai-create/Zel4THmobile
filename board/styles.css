@@ -1865,3 +1865,53 @@ button.ghost.danger {
 .prop-model[data-state="error"]::after {
   content: "3D โหลดไม่สำเร็จ";
 }
+
+/* ---------- voice: dictation mic + read-aloud toggle ---------- */
+
+.composer .mic {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #ffffff0a;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.composer .mic:hover {
+  background: #ffffff16;
+}
+
+.composer .mic.listening {
+  color: #0a0c11;
+  background: var(--accent, #6ee7b7);
+  border-color: transparent;
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent, #6ee7b7) 25%, transparent);
+  }
+}
+
+.dlg-speak {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dlg-speak.on {
+  color: var(--accent, #6ee7b7);
+  background: color-mix(in srgb, var(--accent, #6ee7b7) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #6ee7b7) 40%, transparent);
+}
