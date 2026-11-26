@@ -61,7 +61,33 @@ npm start            # = node dist/cli.js gateway
 
 ### 2.1 อัปเดตโค้ดบนเครื่องที่รันอยู่ (Termux / มือถือ / Mac)
 
-ใช้ทุกครั้งที่ต้องการอัปเดตเป็นเวอร์ชันใหม่:
+ใช้ทุกครั้งที่ต้องการอัปเดตเป็นเวอร์ชันใหม่
+
+#### สูตรเดียวจบ (แนะนำ)
+
+```bash
+cd ~/Zel4THmobile
+
+git checkout -- package.json package-lock.json   # 1) ทิ้งการแก้ที่ approve-scripts ทำไว้
+git pull                                        # 2) ดึงโค้ดใหม่
+pkill -f "dist/cli.js gateway"                  # 3) ปิด gateway ตัวเก่า
+npm install                                     # 4) ติดตั้ง dependency
+npm run build && npm start                      # 5) build แล้วรัน
+```
+
+อธิบายทีละบรรทัด:
+
+| ขั้น | ทำไมต้องทำ |
+|---|---|
+| `git checkout -- package.json package-lock.json` | `npm install-scripts approve`/`npm approve-scripts` เขียนสองไฟล์นี้ในเครื่อง ทำให้ `git pull` ฟ้อง `would be overwritten` |
+| `git pull` | ได้โค้ด + `allowScripts` ล่าสุด (ไม่ต้อง approve esbuild อีก) |
+| `pkill -f "dist/cli.js gateway"` | กัน `fatal: listen EADDRINUSE 0.0.0.0:8787` จากตัวเก่าที่ค้าง |
+| `npm install` | ติดตั้ง/อัปเดต dependency ตาม lock ใหม่ |
+| `npm run build && npm start` | compile แล้วรันด้วย `node dist/cli.js gateway` |
+
+ถ้าอยากเริ่มใหม่สะอาด ๆ ให้ใช้ `exec` แทน `npm start` ในคำสั่งสุดท้าย (ใช้ PID เดียว ไม่มีชั้น npm ค้าง)
+
+#### สูตรสั้น (เมื่อแน่ใจว่าไม่มีอะไรค้าง)
 
 ```bash
 cd ~/Zel4THmobile

@@ -56,6 +56,27 @@ socket: ws://localhost:8787/ws
 
 ### อัปเดตโค้ดบนเครื่องที่รันอยู่ (Termux / มือถือ / Mac)
 
+#### สูตรเดียวจบ (แนะนำ) — ก๊อปทั้งบล็อก
+
+```bash
+cd ~/Zel4THmobile
+
+# 1) เคลียร์ไฟล์ที่ npm approve-scripts แก้ไว้ แล้วดึงโค้ดใหม่
+git checkout -- package.json package-lock.json
+git pull
+
+# 2) ปิด gateway ตัวเก่า (กัน EADDRINUSE: address already in use)
+pkill -f "dist/cli.js gateway"
+
+# 3) ติดตั้ง + build + รัน
+npm install
+npm run build && npm start
+```
+
+ทำแบบนี้ทุกครั้งที่อัปเดต — สามบรรทัดแรกกันปัญหาที่เจอบ่อยที่สุดสองอย่าง (pull ไม่ผ่านเพราะไฟล์ถูกแก้ในเครื่อง, พอร์ต 8787 ถูกตัวเก่ายึด)
+
+#### สูตรสั้น (เมื่อไม่มีอะไรค้าง)
+
 ```bash
 cd ~/Zel4THmobile
 # กด Ctrl+C ให้ gateway ตัวเก่าหยุดก่อน
