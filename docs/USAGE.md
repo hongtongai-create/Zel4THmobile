@@ -59,6 +59,10 @@ npm start            # = node dist/cli.js gateway
 
 ระหว่างพัฒนาใช้ `npm run dev` (tsx, ไม่ต้อง build) ได้
 
+> **npm 12 ขึ้นไป**: npm รุ่นใหม่บล็อก install script ของ dependency โดยค่าเริ่มต้น จึงอาจเห็น `npm warn install-scripts 1 package has install scripts not yet covered by allowScripts: esbuild`
+> — ไม่ใช่ error และไม่กระทบ `npm start` (รันไฟล์ที่ compile แล้ว) รีโปนี้ประกาศ `"allowScripts": { "esbuild": true }` ไว้ใน `package.json` แล้ว
+> ถ้าต้องการให้ `npm run dev` ทำงาน ให้อนุมัติ esbuild: `npm install-scripts approve esbuild` แล้ว `npm rebuild esbuild`
+
 เปิดเบราว์เซอร์:
 
 ```
@@ -351,6 +355,7 @@ VIDEO_DURATION=5
 | อาการ | สาเหตุ/วิธีแก้ |
 |---|---|
 | เปิดบอร์ดแล้ว `401 unauthorized` | URL ไม่มี `?token=` หรือ token ไม่ตรงกับ `.env` (รีสตาร์ทหลังแก้ `.env`) |
+| `npm install` เตือน `install-scripts … not covered by allowScripts` | npm 12 บล็อกสคริปต์ของ dependency โดยค่าเริ่มต้น (ปกติ ไม่กระทบการรัน) — รีโปนี้ประกาศ `allowScripts: { esbuild: true }` ไว้ใน `package.json` แล้ว ถ้ายังเห็นข้อความเดิม ให้ `npm install` อีกครั้ง หรือ `npm install-scripts approve esbuild` (npm 12) / `npm approve-scripts esbuild` (npm 11.16+) ตามด้วย `npm rebuild esbuild` |
 | `EADDRINUSE` ตอน start | พอร์ตชน — เปลี่ยน `PORT` หรือปิด process เก่า (`lsof -ti :8787`) |
 | รายการโมเดลว่าง | ยังไม่ได้ใส่ key หรือ `*_MODELS` ว่าง → `npm run models` ดูสาเหตุ |
 | agent ไม่ยอมใช้ tool | ยังไม่ติ๊กอนุญาตในหน้าการ์ด agent หรือปลั๊กอินชุดนั้นยังไม่เปิด |
