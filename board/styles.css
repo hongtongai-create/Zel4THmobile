@@ -1915,3 +1915,19 @@ button.ghost.danger {
   background: color-mix(in srgb, var(--accent, #6ee7b7) 16%, transparent);
   border-color: color-mix(in srgb, var(--accent, #6ee7b7) 40%, transparent);
 }
+
+/* Hands-free conversation: the mic stays hot, so show it clearly. */
+.dlg-handsfree.on {
+  color: #0a0c11;
+  background: var(--accent, #6ee7b7);
+  border-color: transparent;
+}
+
+.composer .mic.loop {
+  color: var(--accent, #6ee7b7);
+  border-color: color-mix(in srgb, var(--accent, #6ee7b7) 60%, transparent);
+}
+
+body.voice-loop .composer {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #6ee7b7) 45%, transparent) inset;
+}

@@ -14,6 +14,7 @@ const els = {
   composer: document.getElementById("composer"),
   chatMic: document.getElementById("chat-mic"),
   chatSpeak: document.getElementById("chat-speak"),
+  chatHandsfree: document.getElementById("chat-handsfree"),
   input: document.getElementById("input"),
   send: document.getElementById("send"),
   modelBtn: document.getElementById("model-btn"),
@@ -262,7 +263,11 @@ function setView(view) {
   if (view === "chat") {
     els.messages.scrollTop = els.messages.scrollHeight;
     els.viewToggle.blur();
+  } else {
+    stopListening();
   }
+  updateVoiceChrome();
+  if (view === "chat") window.setTimeout(handsfreeTick, 300);
 }
 
 /* ---------- chat messages ---------- */
@@ -287,13 +292,16 @@ els.messages.addEventListener("scroll", () => {
 /* ---------- voice: speech to speech ---------- */
 
 const SPEAK_KEY = "clawgate.voiceSpeak";
+const HANDSFREE_KEY = "clawgate.voiceHandsfree";
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 const voice = {
   speak: storage.get(SPEAK_KEY) === "1",
+  handsfree: storage.get(HANDSFREE_KEY) === "1",
   listening: false,
   recognition: null,
   last: "",
+  emptyEnds: 0,
 };
 
 /** Prefers a Thai system voice, then any voice the device offers. */
@@ -305,22 +313,41 @@ function pickVoice() {
 }
 
 function updateVoiceChrome() {
-  const on = voice.speak && "speechSynthesis" in window;
-  els.chatSpeak?.classList.toggle("on", on);
-  els.chatSpeak?.setAttribute("aria-pressed", on ? "true" : "false");
-  if (els.chatSpeak) els.chatSpeak.hidden = !("speechSynthesis" in window);
+  const canSpeak = "speechSynthesis" in window;
+  const on = voice.speak && canSpeak;
+  if (els.chatSpeak) {
+    els.chatSpeak.hidden = !canSpeak;
+    els.chatSpeak.classList.toggle("on", on);
+    els.chatSpeak.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  const handsfreeOn = voice.handsfree && Boolean(Recognition);
+  if (els.chatHandsfree) {
+    els.chatHandsfree.hidden = !Recognition;
+    els.chatHandsfree.classList.toggle("on", handsfreeOn);
+    els.chatHandsfree.setAttribute("aria-pressed", handsfreeOn ? "true" : "false");
+  }
+  if (els.chatMic) els.chatMic.classList.toggle("loop", handsfreeOn);
+  document.body.classList.toggle("voice-loop", handsfreeOn && state.view === "chat");
+  if (els.input) els.input.placeholder = handsfreeOn ? "กำลังฟัง… พูดได้เลย" : "Message the agent…";
 }
 
 /** Reads an agent reply aloud, dropping code blocks and markdown noise. */
-function speak(text) {
-  if (!voice.speak || !("speechSynthesis" in window)) return;
+function speak(text, onDone) {
+  const done = typeof onDone === "function" ? onDone : null;
+  if (!voice.speak || !("speechSynthesis" in window)) {
+    done?.();
+    return;
+  }
   const clean = String(text ?? "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/[`*_#>]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 800);
-  if (!clean) return;
+  if (!clean) {
+    done?.();
+    return;
+  }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(clean);
   const chosen = pickVoice();
@@ -329,6 +356,14 @@ function speak(text) {
     utterance.lang = chosen.lang;
   }
   utterance.rate = 1.05;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    done?.();
+  };
+  utterance.onend = finish;
+  utterance.onerror = finish;
   window.speechSynthesis.speak(utterance);
 }
 
@@ -336,25 +371,38 @@ function stopSpeaking() {
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
 
-/** Mic button: listen, put the transcript in the composer, then send it. */
-function toggleListening() {
+function stopListening() {
+  const recognition = voice.recognition;
+  if (!recognition) return;
+  try {
+    recognition.stop();
+  } catch {
+    /* already stopped */
+  }
+}
+
+/**
+ * One listening turn. In hands-free mode the engine keeps running and the
+ * sentence is sent as soon as it is final, without pressing send.
+ */
+function startListening() {
   if (!Recognition) {
     toast("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง ลองใช้ Chrome หรือ Safari เวอร์ชันใหม่");
     return;
   }
-  if (voice.listening) {
-    voice.recognition?.stop();
-    return;
-  }
+  if (voice.listening) return;
   stopSpeaking();
   const recognition = new Recognition();
-  recognition.lang = /^th/i.test(document.documentElement.lang || "") ? "th-TH" : navigator.language || "en-US";
+  recognition.lang = /^th/i.test(document.documentElement.lang || "")
+    ? "th-TH"
+    : navigator.language || "en-US";
   recognition.interimResults = true;
-  recognition.continuous = false;
+  recognition.continuous = voice.handsfree;
   recognition.maxAlternatives = 1;
 
   let finalText = "";
   recognition.onresult = (event) => {
+    voice.emptyEnds = 0;
     let interim = "";
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       const result = event.results[index];
@@ -364,15 +412,30 @@ function toggleListening() {
     els.input.value = (finalText || interim).trim();
   };
   recognition.onerror = (event) => {
-    if (event.error === "aborted") return;
+    if (event.error === "aborted" || event.error === "no-speech") return;
     toast(event.error === "not-allowed" ? "ไม่ได้รับอนุญาตให้ใช้ไมโครโฟน" : `ฟังเสียงไม่สำเร็จ: ${event.error}`);
+    if (event.error === "not-allowed") setHandsfree(false);
   };
   recognition.onend = () => {
     voice.listening = false;
     voice.recognition = null;
     els.chatMic?.classList.remove("listening");
     const text = els.input.value.trim();
-    if (text && !state.busy) els.composer.requestSubmit();
+    if (text && !state.busy) {
+      voice.emptyEnds = 0;
+      els.composer.requestSubmit();
+      return;
+    }
+    if (!voice.handsfree) return;
+    // A mic that never hears anything would otherwise retry forever.
+    voice.emptyEnds = (voice.emptyEnds ?? 0) + 1;
+    if (voice.emptyEnds >= 3) {
+      voice.emptyEnds = 0;
+      setHandsfree(false);
+      toast("ไม่ได้ยินเสียงจากไมโครโฟน — ตรวจสอบสิทธิ์ไมค์แล้วเปิดโหมดอีกครั้ง");
+      return;
+    }
+    window.setTimeout(handsfreeTick, 700);
   };
 
   voice.recognition = recognition;
@@ -386,10 +449,57 @@ function toggleListening() {
   }
 }
 
+/**
+ * Starts the next turn when the loop is idle: nothing spoken, no reply pending.
+ * Every pause point calls this instead of asking the user to press the mic.
+ */
+function handsfreeTick() {
+  if (!voice.handsfree || !Recognition) return;
+  if (state.view !== "chat" || document.hidden) return;
+  if (state.busy || voice.listening) return;
+  if ("speechSynthesis" in window && window.speechSynthesis.speaking) return;
+  startListening();
+}
+
+function setHandsfree(on) {
+  voice.handsfree = Boolean(on) && Boolean(Recognition);
+  storage.set(HANDSFREE_KEY, voice.handsfree ? "1" : "0");
+  if (voice.handsfree && "speechSynthesis" in window && !voice.speak) {
+    voice.speak = true;
+    storage.set(SPEAK_KEY, "1");
+  }
+  updateVoiceChrome();
+  if (voice.handsfree) {
+    handsfreeTick();
+    if (!voice.listening) toast("โหมดคุยต่อเนื่อง: พูดได้เลยครับ");
+  } else {
+    stopListening();
+    stopSpeaking();
+  }
+}
+
+function toggleListening() {
+  if (!Recognition) {
+    toast("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง ลองใช้ Chrome หรือ Safari เวอร์ชันใหม่");
+    return;
+  }
+  if (voice.handsfree) {
+    setHandsfree(false);
+    return;
+  }
+  if (voice.listening) {
+    stopListening();
+    return;
+  }
+  startListening();
+}
+
 function initVoice() {
   updateVoiceChrome();
   if (els.chatMic) els.chatMic.hidden = !Recognition;
+  if (els.chatHandsfree) els.chatHandsfree.hidden = !Recognition;
   els.chatMic?.addEventListener("click", toggleListening);
+  els.chatHandsfree?.addEventListener("click", () => setHandsfree(!voice.handsfree));
   els.chatSpeak?.addEventListener("click", () => {
     voice.speak = !voice.speak;
     storage.set(SPEAK_KEY, voice.speak ? "1" : "0");
@@ -408,8 +518,9 @@ function addBubble(role, text, options = {}) {
   scrollToBottom(role === "user");
   if (role === "assistant") {
     voice.last = String(text ?? "");
-    // Replayed history is silent; only fresh replies are spoken.
-    if (options.speak !== false) speak(text);
+    // Replayed history is silent; only fresh replies are spoken. When the
+    // reading finishes, the hands-free loop listens again by itself.
+    if (options.speak !== false) speak(text, handsfreeTick);
   }
   return div;
 }
@@ -460,7 +571,11 @@ function stopTyping() {
 function setBusy(busy) {
   state.busy = busy;
   els.send.disabled = busy;
-  if (!busy) stopTyping();
+  if (!busy) {
+    stopTyping();
+    // Hand-free conversation picks the next turn up once the reply is done.
+    window.setTimeout(handsfreeTick, 350);
+  }
 }
 
 function updateMeta(session) {
@@ -2272,7 +2387,9 @@ els.input.addEventListener("input", () => {
 els.talkClose.addEventListener("click", hideTalk);
 els.chatClose.addEventListener("click", () => {
   stopSpeaking();
+  stopListening();
   setView("office");
+  updateVoiceChrome();
 });
 els.chatAlpha?.addEventListener("click", cycleDialogAlpha);
 els.talkAlpha?.addEventListener("click", cycleDialogAlpha);
