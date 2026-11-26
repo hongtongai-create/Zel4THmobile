@@ -1846,3 +1846,22 @@ button.ghost.danger {
   object-fit: cover;
   box-shadow: 0 0 0 1px #ffffff1f, 0 6px 16px #00000070;
 }
+
+/* .glb props render into a small WebGL canvas instead of an <img>. */
+.prop-model {
+  aspect-ratio: 3 / 4;
+}
+
+.prop-model[data-state="loading"]::after,
+.prop-model[data-state="error"]::after {
+  position: absolute;
+  inset: auto 0 0;
+  font-size: 10px;
+  text-align: center;
+  color: var(--muted, #93a0b8);
+  content: "3D กำลังโหลด…";
+}
+
+.prop-model[data-state="error"]::after {
+  content: "3D โหลดไม่สำเร็จ";
+}

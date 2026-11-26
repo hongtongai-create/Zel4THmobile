@@ -1,5 +1,5 @@
 /* Zel4THmobile board service worker: offline app shell + stale-while-revalidate assets. */
-const CACHE = "Zel4THmobile-shell-v15";
+const CACHE = "Zel4THmobile-shell-v16";
 const SHELL = [
   "/",
   "/styles.css",

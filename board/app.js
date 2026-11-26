@@ -566,7 +566,38 @@ function applyUi() {
   layoutSceneFrame();
 }
 
-/** Props sit between the scene art and the characters, positioned in percent. */
+const isModelFile = (image) => /\.glb$/i.test(image ?? "");
+
+let model3dPromise = null;
+/** three.js only loads when a .glb prop is actually on the stage. */
+function loadModel3d() {
+  model3dPromise ??= import("/model3d.js");
+  return model3dPromise;
+}
+
+async function mountProp(host, url) {
+  try {
+    const { mountModel } = await loadModel3d();
+    if (host.isConnected) mountModel(host, url);
+  } catch {
+    host.dataset.state = "error";
+  }
+}
+
+async function unmountProp(host) {
+  try {
+    const { unmountModel } = await loadModel3d();
+    unmountModel(host);
+  } catch {
+    /* the module never loaded, so there is nothing to release */
+  }
+}
+
+/**
+ * Props sit between the scene art and the characters, positioned in percent.
+ * Nodes are reconciled by id so a WebGL viewer is created once, not on every
+ * settings change.
+ */
 function renderProps() {
   const frame = els.sceneFrame;
   if (!frame) return;
@@ -575,17 +606,37 @@ function renderProps() {
     layer = el("div", "prop-layer");
     frame.prepend(layer);
   }
-  layer.innerHTML = "";
-  for (const prop of state.ui?.props ?? []) {
-    if (!prop?.image) continue;
-    const node = el("img", "prop");
-    node.src = prop.image;
-    node.alt = prop.name ?? "";
+  const props = (state.ui?.props ?? []).filter((prop) => prop?.image);
+  const wanted = new Set(props.map((prop) => prop.id));
+
+  for (const node of [...layer.children]) {
+    if (wanted.has(node.dataset.id)) continue;
+    if (node.dataset.kind === "model") void unmountProp(node);
+    node.remove();
+  }
+
+  for (const prop of props) {
+    const model = isModelFile(prop.image);
+    let node = layer.querySelector(`[data-id="${CSS.escape(prop.id)}"]`);
+    if (node && (node.dataset.kind === "model") !== model) {
+      if (node.dataset.kind === "model") void unmountProp(node);
+      node.remove();
+      node = null;
+    }
+    if (!node) {
+      node = el(model ? "div" : "img", model ? "prop prop-model" : "prop");
+      node.dataset.id = prop.id;
+      node.dataset.kind = model ? "model" : "image";
+      if (!model) node.alt = prop.name ?? "";
+      layer.append(node);
+      if (model) void mountProp(node, prop.image);
+    }
+    if (!model) node.src = prop.image;
+    const width = Math.round(140 * (prop.scale ?? 1));
     node.style.left = `${prop.x}%`;
     node.style.top = `${prop.y}%`;
-    node.style.width = `${Math.round(140 * (prop.scale ?? 1))}px`;
-    node.dataset.id = prop.id;
-    layer.append(node);
+    node.style.width = `${width}px`;
+    if (model) node.style.height = `${Math.round(width * 1.35)}px`;
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "zel4thmobile",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Zel4THmobile: model selection, Telegram channel, Facebook posting, token-authenticated WebSocket gateway + board.",
@@ -26,6 +26,7 @@
   "devDependencies": {
     "@types/node": "^22.13.1",
     "@types/ws": "^8.5.13",
+    "three": "^0.160.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   },

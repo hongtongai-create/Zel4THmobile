@@ -27,3 +27,6 @@ gateway.log
 
 # plugins the gateway archived instead of deleting
 extensions/plugins/.removed/
+
+# art uploaded from the studio stays on this machine
+board/assets/props/
