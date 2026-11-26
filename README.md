@@ -87,6 +87,23 @@ npm rebuild esbuild
 
 อนุมัติแล้วไม่ย้อนหลังอัตโนมัติ — ต้อง `npm rebuild esbuild` ตามหนึ่งครั้ง ไม่งั้น `npm run dev` จะไม่พบ binary
 
+#### ถ้า `git pull` ไม่ได้ (local changes / EADDRINUSE)
+
+`npm install-scripts approve` เขียน `package.json` + `package-lock.json` ในเครื่อง ทำให้ pull ฟ้อง `would be overwritten`:
+
+```bash
+git checkout -- package.json package-lock.json
+git pull
+npm install
+npm run build && npm start
+```
+
+ถ้าเจอ `fatal: listen EADDRINUSE 0.0.0.0:8787` = มี gateway ตัวเก่ารันค้าง (เซสชัน/tmux เก่า) ปิดก่อน:
+
+```bash
+pkill -f "dist/cli.js gateway"    # Termux/Linux; macOS: lsof -ti :8787 | xargs kill
+```
+
 <!-- หมายเหตุ: ส่วนนี้ต้องเหมือนกับ docs/USAGE.md §2.1 -->
 
 ## ตั้งค่า model
