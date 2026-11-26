@@ -301,8 +301,32 @@ const voice = {
   listening: false,
   recognition: null,
   last: "",
+  lastSpoken: "",
+  guardUntil: 0,
+  submitted: false,
   emptyEnds: 0,
 };
+
+/** Echo guard: the mic reopens only after this much silence following playback. */
+const ECHO_GUARD_MS = 1400;
+
+/** Character-trigram overlap, which works for Thai without spaces. */
+function looksLikeOwnVoice(text) {
+  const normalize = (value) => String(value ?? "").replace(/\s+/g, "").toLowerCase();
+  const heard = normalize(text);
+  const spoken = normalize(voice.lastSpoken);
+  if (heard.length < 8 || spoken.length < 8) return false;
+  const grams = (value) => {
+    const set = new Set();
+    for (let index = 0; index < value.length - 2; index += 1) set.add(value.slice(index, index + 3));
+    return set;
+  };
+  const heardGrams = grams(heard);
+  const spokenGrams = grams(spoken);
+  let hits = 0;
+  for (const gram of heardGrams) if (spokenGrams.has(gram)) hits += 1;
+  return heardGrams.size > 0 && hits / heardGrams.size >= 0.5;
+}
 
 /** Prefers a Thai system voice, then any voice the device offers. */
 function pickVoice() {
@@ -348,6 +372,9 @@ function speak(text, onDone) {
     done?.();
     return;
   }
+  // Never listen while the speaker is talking, or the mic picks up our own voice.
+  stopListening();
+  voice.lastSpoken = clean;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(clean);
   const chosen = pickVoice();
@@ -360,6 +387,8 @@ function speak(text, onDone) {
   const finish = () => {
     if (finished) return;
     finished = true;
+    // Speakers often keep ringing for a moment after `onend`; hold the mic.
+    voice.guardUntil = performance.now() + ECHO_GUARD_MS;
     done?.();
   };
   utterance.onend = finish;
@@ -403,13 +432,33 @@ function startListening() {
   let finalText = "";
   recognition.onresult = (event) => {
     voice.emptyEnds = 0;
+    let chunk = "";
     let interim = "";
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       const result = event.results[index];
-      if (result.isFinal) finalText += result[0].transcript;
+      if (result.isFinal) chunk += result[0].transcript;
       else interim += result[0].transcript;
     }
-    els.input.value = (finalText || interim).trim();
+    finalText += chunk;
+    const current = (finalText || interim).trim();
+    if (!current) return;
+
+    // Sound captured inside the echo window, or our own sentence coming back
+    // from the speaker, is dropped instead of being answered.
+    if (performance.now() < voice.guardUntil && !chunk) return;
+    if (looksLikeOwnVoice(current)) {
+      finalText = "";
+      els.input.value = "";
+      return;
+    }
+    els.input.value = current;
+
+    // The user talking over the reply wins: cut the audio and take the turn.
+    if ("speechSynthesis" in window && window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      voice.guardUntil = 0;
+    }
+    if (voice.handsfree && chunk.trim()) submitSpeech(current);
   };
   recognition.onerror = (event) => {
     if (event.error === "aborted" || event.error === "no-speech") return;
@@ -420,6 +469,10 @@ function startListening() {
     voice.listening = false;
     voice.recognition = null;
     els.chatMic?.classList.remove("listening");
+    if (voice.submitted) {
+      voice.submitted = false;
+      return;
+    }
     const text = els.input.value.trim();
     if (text && !state.busy) {
       voice.emptyEnds = 0;
@@ -458,7 +511,21 @@ function handsfreeTick() {
   if (state.view !== "chat" || document.hidden) return;
   if (state.busy || voice.listening) return;
   if ("speechSynthesis" in window && window.speechSynthesis.speaking) return;
+  // Wait out the echo guard so the speaker tail never reaches the mic.
+  const wait = voice.guardUntil - performance.now();
+  if (wait > 0) {
+    window.setTimeout(handsfreeTick, Math.min(wait + 60, ECHO_GUARD_MS));
+    return;
+  }
   startListening();
+}
+
+/** Hands-free turn: stop the mic first, then send the finished sentence. */
+function submitSpeech(text) {
+  voice.submitted = true;
+  stopListening();
+  els.input.value = text;
+  els.composer.requestSubmit();
 }
 
 function setHandsfree(on) {
