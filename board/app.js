@@ -246,7 +246,7 @@ function updateViewChrome() {
 /** The chat plate names and pictures whoever a message would go to. */
 function syncChatSpeaker() {
   const agent = findAgent(state.agentId);
-  const label = agent?.name ?? "clawgate";
+  const label = agent?.name ?? "Zel4THmobile";
   if (els.chatSpeaker.textContent !== label) els.chatSpeaker.textContent = label;
   const key = agent ? `${agent.id}:${agent.sprite ?? ""}` : "";
   if (els.chatPortrait.dataset.agent === key) return;

@@ -190,7 +190,7 @@ async function main() {
   const stubPort = stub.address().port;
   const stubBase = `http://127.0.0.1:${stubPort}`;
 
-  const dataDir = await mkdtemp(path.join(tmpdir(), "clawgate-smoke-"));
+  const dataDir = await mkdtemp(path.join(tmpdir(), "zel4th-smoke-"));
 
   Object.assign(process.env, {
     GATEWAY_TOKEN: "smoke-token",
@@ -269,7 +269,7 @@ async function main() {
     // 2. Board assets are served
     const board = await fetch(`http://127.0.0.1:${port}/`);
     assert.equal(board.status, 200);
-    assert.match(await board.text(), /clawgate/);
+    assert.match(await board.text(), /Zel4THmobile/);
     check("board index.html served");
 
     // 3. Status endpoint requires the token

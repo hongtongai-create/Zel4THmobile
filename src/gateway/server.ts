@@ -530,7 +530,7 @@ export function createGateway(options: GatewayOptions) {
         const state = await agentsState();
         send(socket, {
           type: "ready",
-          agent: "clawgate",
+          agent: "Zel4THmobile",
           tools: harness.tools.names(),
           defaultModel: harness.catalog.defaultRef(),
           models: harness.catalog.list(),
@@ -604,7 +604,7 @@ export function createGateway(options: GatewayOptions) {
 
     if (url.pathname === "/api/health") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, agent: "clawgate", online: clients.size }));
+      res.end(JSON.stringify({ ok: true, agent: "Zel4THmobile", online: clients.size }));
       return;
     }
 

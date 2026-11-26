@@ -76,7 +76,7 @@ export class McpClient {
     await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: "clawgate", version: "0.1.0" },
+      clientInfo: { name: "Zel4THmobile", version: "1.0.0" },
     });
     this.notify("notifications/initialized", {});
 

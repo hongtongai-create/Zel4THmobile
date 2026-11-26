@@ -535,7 +535,7 @@ ssh-copy-id -p 22 lastcore@100.102.143.107    # Termux ใช้ -p 8022 แล�
 เขียนไฟล์/สคริปต์ข้ามเครื่อง:
 
 ```json
-{"path":"/sdcard/clawgate/report.md","content":"# ยอดขายวันนี้\n- ..."}
+{"path":"/sdcard/zel4thmobile/report.md","content":"# ยอดขายวันนี้\n- ..."}
 ```
 
 ข้อจำกัดของ Termux ที่ควรรู้ (เจอจริงบนเครื่องทดสอบ):

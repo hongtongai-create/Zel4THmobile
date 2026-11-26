@@ -65,7 +65,7 @@ export const tools = [
 `;
 
 async function main() {
-  const base = await mkdtemp(path.join(tmpdir(), "clawgate-ext-"));
+  const base = await mkdtemp(path.join(tmpdir(), "zel4th-ext-"));
   const extensionsDir = path.join(base, "extensions");
   const dataDir = path.join(base, "data");
   const mcpServerPath = path.join(base, "demo-mcp.mjs");

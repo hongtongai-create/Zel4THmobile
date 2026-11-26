@@ -173,8 +173,8 @@ npm run models          # หรือ node dist/cli.js models
 
 ```bash
 # บนเครื่องที่รัน gateway
-ssh-keygen -t ed25519 -N "" -f ~/.ssh/clawgate_ed25519   # ถ้ายังไม่มี
-cat ~/.ssh/clawgate_ed25519.pub                            # คัดลอกไปต่อท้าย authorized_keys ของเครื่องปลายทาง
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/zel4thmobile_ed25519   # ถ้ายังไม่มี
+cat ~/.ssh/zel4thmobile_ed25519.pub                            # คัดลอกไปต่อท้าย authorized_keys ของเครื่องปลายทาง
 ```
 
 ทดสอบจากบอร์ด: เปิดแชทกับ agent แล้วสั่ง เช่น
