@@ -39,6 +39,7 @@ Board(WS)─┘        │
 npm install
 cp .env.example .env
 # แก้ GATEWAY_TOKEN และใส่ key ของ model อย่างน้อยหนึ่งตัว # openssl rand -hex 32
+sed -i "s|^GATEWAY_TOKEN=.*|GATEWAY_TOKEN=$(openssl rand -hex 32)|" ~/Zel4THmobile/.env
 npm run dev           # = tsx src/cli.ts gateway
 ```
 
